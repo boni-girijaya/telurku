@@ -32,6 +32,11 @@ const subordinateRolesByActor = {
   admin: ["Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
 };
 
+const creatableRolesByActor = {
+  owner: ["Admin", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+  admin: ["Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+};
+
 const dbRoleToLabel = {
   owner: "Owner",
   admin: "Admin",
@@ -41,6 +46,7 @@ const dbRoleToLabel = {
 };
 
 const labelToDbRole = Object.fromEntries(Object.entries(dbRoleToLabel).map(([key, value]) => [value, key]));
+const INTERNAL_EMAIL_DOMAIN = "telurku.local";
 
 function seedData() {
   const statuses = ["Aktif", "Aktif", "Aktif", "Belum Bertelur", "Aktif", "Aktif", "Afkir", "Aktif"];
@@ -119,6 +125,16 @@ function currentUser() {
 function assignedCage(userName = currentUser().name) { return db.cages.find(c => c.keeper === userName); }
 function sum(list, key) { return list.reduce((a, item) => a + Number(typeof key === "function" ? key(item) : item[key] || 0), 0); }
 function escapeHtml(v = "") { return String(v).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
+function loginToEmail(value = "") {
+  const login = String(value).trim().toLowerCase().replace(/\s+/g, "");
+  if (!login) return "";
+  return login.includes("@") ? login : `${login}@${INTERNAL_EMAIL_DOMAIN}`;
+}
+function emailToLogin(value = "") {
+  return String(value).endsWith(`@${INTERNAL_EMAIL_DOMAIN}`)
+    ? String(value).replace(`@${INTERNAL_EMAIL_DOMAIN}`, "")
+    : String(value);
+}
 function statusBadge(status) {
   const map = { received: ["done", "Selesai"], waiting: ["wait", "Menunggu"], issue: ["issue", "Selisih"], Aktif: ["done", "Aktif"], Afkir: ["issue", "Afkir"], "Belum Bertelur": ["wait", "Belum bertelur"], Kosong: ["info", "Kosong"] };
   const item = map[status] || ["info", status];
@@ -146,6 +162,7 @@ function profileToUser(profile, passwordMap = new Map()) {
   return {
     id: profile.id,
     email: profile.auth_email || "",
+    login: emailToLogin(profile.auth_email || ""),
     name: profile.full_name,
     role: dbRoleToLabel[profile.role] || profile.role,
     assignment: profile.assignment || "Belum ditentukan",
@@ -184,7 +201,7 @@ function loginPage(message = "") {
       <p>Gunakan akun yang sudah dibuat di Supabase Authentication.</p>
       ${message ? `<div class="alert">${escapeHtml(message)}</div>` : ""}
       <form id="login-form">
-        <div class="form-group"><label>Email</label><input name="email" type="email" autocomplete="email" required /></div>
+        <div class="form-group"><label>Username / Email</label><input name="login" autocomplete="username" required /></div>
         <div class="form-group"><label>Password</label><input name="password" type="password" autocomplete="current-password" required /></div>
         <button class="btn btn-primary btn-block">Masuk</button>
       </form>
@@ -328,11 +345,11 @@ function cagesPage() {
 function usersPage() {
   const editing = db.users.find(u=>u.id===state.editUserId);
   const showForm = state.showUserForm || editing;
-  const allowedRoles = subordinateRolesByActor[state.role] || [];
+  const allowedRoles = editing?.role === "Owner" ? ["Owner"] : (creatableRolesByActor[state.role] || []);
   const assignments = ["Belum ditentukan", ...db.cages.map(c=>c.name), "Penerimaan", "Gudang", "Laporan", "Semua akses"];
   const canEditCurrent = !editing || canManageUser(editing);
-  return `${showForm && canEditCurrent ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">${editing?"Ubah pengguna":"Tambah pengguna"}</div><p class="card-sub">Owner dapat mengatur semua posisi. Admin hanya mengatur posisi di bawah admin.</p><form id="user-form" style="margin-top:20px"><div class="form-group"><label>Nama lengkap</label><input name="name" value="${escapeHtml(editing?.name||"")}" required /></div><div class="form-group"><label>Email login</label><input name="email" type="email" value="${escapeHtml(editing?.email||"")}" required autocomplete="email" /></div><div class="form-row"><div class="form-group"><label>Posisi</label><select name="role">${allowedRoles.map(r=>`<option ${editing?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="form-group"><label>Status</label><select name="status"><option ${editing?.status!=="Nonaktif"?"selected":""}>Aktif</option><option ${editing?.status==="Nonaktif"?"selected":""}>Nonaktif</option></select></div></div><div class="form-group"><label>Password</label><input name="password" value="${escapeHtml(editing?.password||"")}" ${editing?"":"required"} autocomplete="new-password" /><div class="hint" style="margin-top:8px">${editing?"Isi password hanya jika ingin mengganti password.":"Password awal untuk akun login baru."}</div></div><div class="form-group"><label>Penugasan kandang / area</label><select name="assignment" required>${assignments.map(a=>`<option ${editing?.assignment===a?"selected":""}>${escapeHtml(a)}</option>`).join("")}</select><div class="hint" style="margin-top:8px">Untuk Anak Kandang, pilih tepat satu kandang. Pilihan ini menentukan tujuan setiap setoran.</div></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-user">Batal</button><button class="btn btn-primary">Simpan pengguna</button></div></form></div></div>` : ""}
-  <div class="section-head"><div><h2>Pengguna sistem</h2><p>Beberapa karyawan dapat memiliki posisi yang sama</p></div><button class="btn btn-primary" id="add-user">+ Tambah pengguna</button></div><div class="card table-wrap"><table><thead><tr><th>Nama</th><th>Email</th><th>Posisi</th><th>Penugasan</th><th>Password</th><th>Status</th><th></th></tr></thead><tbody>${db.users.map(u=>{const locked=!canManageUser(u);return `<tr><td><div class="name-cell"><span class="mini-avatar">${u.name.split(" ").map(x=>x[0]).slice(0,2).join("")}</span><b>${u.name}</b></div></td><td>${escapeHtml(u.email||"")}</td><td>${u.role}</td><td>${u.assignment}</td><td>${passwordCell(u)}</td><td>${statusBadge(u.status)}</td><td>${locked?`<span class="badge wait">Dilindungi</span>`:`<button class="btn btn-outline" data-edit-user="${u.id}">Ubah</button> <button class="btn btn-outline" data-toggle-user="${u.id}">${u.status==="Aktif"?"Nonaktifkan":"Aktifkan"}</button>`}</td></tr>`}).join("")}</tbody></table></div>
+  return `${showForm && canEditCurrent ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">${editing?"Ubah pengguna":"Tambah pengguna"}</div><p class="card-sub">Owner dapat mengatur semua posisi. Admin hanya mengatur posisi di bawah admin.</p><form id="user-form" style="margin-top:20px"><div class="form-group"><label>Nama lengkap</label><input name="name" value="${escapeHtml(editing?.name||"")}" required /></div><div class="form-group"><label>Username / Email</label><input name="login" value="${escapeHtml(editing?.login||emailToLogin(editing?.email||""))}" required autocomplete="username" /><div class="hint" style="margin-top:8px">Untuk karyawan, cukup isi username seperti kandang01. Sistem akan menyimpan sebagai email internal.</div></div><div class="form-row"><div class="form-group"><label>Posisi</label><select name="role">${allowedRoles.map(r=>`<option ${editing?.role===r?"selected":""}>${r}</option>`).join("")}</select></div><div class="form-group"><label>Status</label><select name="status"><option ${editing?.status!=="Nonaktif"?"selected":""}>Aktif</option><option ${editing?.status==="Nonaktif"?"selected":""}>Nonaktif</option></select></div></div><div class="form-group"><label>Password</label><input name="password" value="${escapeHtml(editing?.password||"")}" ${editing?"":"required"} autocomplete="new-password" /><div class="hint" style="margin-top:8px">${editing?"Isi password hanya jika ingin mengganti password.":"Password awal untuk akun login baru."}</div></div><div class="form-group"><label>Penugasan kandang / area</label><select name="assignment" required>${assignments.map(a=>`<option ${editing?.assignment===a?"selected":""}>${escapeHtml(a)}</option>`).join("")}</select><div class="hint" style="margin-top:8px">Untuk Anak Kandang, pilih tepat satu kandang. Pilihan ini menentukan tujuan setiap setoran.</div></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-user">Batal</button><button class="btn btn-primary">Simpan pengguna</button></div></form></div></div>` : ""}
+  <div class="section-head"><div><h2>Pengguna sistem</h2><p>Beberapa karyawan dapat memiliki posisi yang sama</p></div><button class="btn btn-primary" id="add-user">+ Tambah pengguna</button></div><div class="card table-wrap"><table><thead><tr><th>Nama</th><th>Username</th><th>Posisi</th><th>Penugasan</th><th>Password</th><th>Status</th><th></th></tr></thead><tbody>${db.users.map(u=>{const locked=!canManageUser(u);return `<tr><td><div class="name-cell"><span class="mini-avatar">${u.name.split(" ").map(x=>x[0]).slice(0,2).join("")}</span><b>${u.name}</b></div></td><td>${escapeHtml(u.login||emailToLogin(u.email||""))}</td><td>${u.role}</td><td>${u.assignment}</td><td>${passwordCell(u)}</td><td>${statusBadge(u.status)}</td><td>${locked?`<span class="badge wait">Dilindungi</span>`:`<button class="btn btn-outline" data-edit-user="${u.id}">Ubah</button> <button class="btn btn-outline" data-toggle-user="${u.id}">${u.status==="Aktif"?"Nonaktifkan":"Aktifkan"}</button>`}</td></tr>`}).join("")}</tbody></table></div>
     <div class="section-head"><div><h2>Aktivitas terbaru</h2><p>Siapa melakukan apa dan kapan</p></div></div><div class="card">${db.audit.length?db.audit.slice(0,8).map(a=>`<div style="padding:14px 18px;border-bottom:1px solid var(--line)"><b>${a.user}</b> ${a.action}<br><small style="color:var(--muted)">${new Date(a.at).toLocaleString("id-ID")}</small></div>`).join(""):empty("Aktivitas baru akan muncul di sini")}</div>`;
 }
 
@@ -364,7 +381,7 @@ function bindAuthEvents() {
     authState = { ...authState, loading: true, error: "" };
     render();
     const { error } = await supabase.auth.signInWithPassword({
-      email: String(fd.get("email")).trim(),
+      email: loginToEmail(fd.get("login")),
       password: String(fd.get("password")),
     });
     if (error) {
@@ -401,7 +418,7 @@ function bindEvents() {
   document.querySelector("#add-user")?.addEventListener("click",()=>{state.editUserId=null;state.showUserForm=true;render();window.scrollTo(0,0)});
   document.querySelectorAll("[data-edit-user]").forEach(el=>el.onclick=()=>{const u=db.users.find(x=>x.id===el.dataset.editUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}state.editUserId=u.id;state.showUserForm=false;render();window.scrollTo(0,0)});
   document.querySelector("#cancel-user")?.addEventListener("click",()=>{state.editUserId=null;state.showUserForm=false;render()});
-  document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const values={id:existing?.id,name:String(fd.get("name")).trim(),email:String(fd.get("email")).trim(),role:fd.get("role"),assignment:String(fd.get("assignment")).trim(),status:fd.get("status"),password:String(fd.get("password")).trim()};if(!subordinateRolesByActor[state.role]?.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}if(values.role==="Anak Kandang"&&!values.assignment.startsWith("Kandang ")){toast("Pilih satu kandang untuk Anak Kandang");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
+  document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const login=String(fd.get("login")).trim();const values={id:existing?.id,name:String(fd.get("name")).trim(),login,email:loginToEmail(login),role:fd.get("role"),assignment:String(fd.get("assignment")).trim(),status:fd.get("status"),password:String(fd.get("password")).trim()};const allowedForSubmit=existing?.role==="Owner"?["Owner"]:(creatableRolesByActor[state.role]||[]);if(!allowedForSubmit.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!values.email){toast("Username / email wajib diisi");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}if(values.role==="Anak Kandang"&&!values.assignment.startsWith("Kandang ")){toast("Pilih satu kandang untuk Anak Kandang");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
   document.querySelectorAll("[data-edit-cage]").forEach(el=>el.onclick=()=>{state.editCageId=Number(el.dataset.editCage);render();window.scrollTo(0,0)});
   document.querySelector("#cancel-cage")?.addEventListener("click",()=>{state.editCageId=null;render()});
   document.querySelector("#cage-form")?.addEventListener("submit",e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const oldKeeper=c.keeper;const newKeeper=fd.get("keeper");const newName=String(fd.get("name")).trim();if(newKeeper!==oldKeeper){const oldUser=db.users.find(u=>u.name===oldKeeper&&u.role==="Anak Kandang");if(oldUser)oldUser.assignment="Belum ditentukan";db.cages.filter(x=>x.id!==c.id&&x.keeper===newKeeper).forEach(x=>x.keeper="Belum ditentukan");}Object.assign(c,{name:newName,status:fd.get("status"),keeper:newKeeper,note:String(fd.get("note")).trim()});const assignedUser=db.users.find(u=>u.name===newKeeper&&u.role==="Anak Kandang");if(assignedUser)assignedUser.assignment=newName;audit(`memperbarui ${c.code}: ${c.name}`);state.editCageId=null;render();toast("Kandang dan assignment berhasil diperbarui")});

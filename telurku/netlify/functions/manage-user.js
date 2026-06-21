@@ -74,6 +74,9 @@ exports.handler = async event => {
     if (!callerProfile?.is_active) return json(403, { error: "Akun tidak aktif." });
 
     const targetRole = roleToDb[payload.role] || payload.role;
+    if (targetRole === "owner" && !payload.id) {
+      return json(403, { error: "Owner hanya boleh satu akun dan tidak bisa dibuat dari menu pengguna." });
+    }
     if (!manageableBy[callerProfile.role]?.includes(targetRole)) {
       return json(403, { error: "Posisi ini tidak bisa dikelola oleh akun saat ini." });
     }

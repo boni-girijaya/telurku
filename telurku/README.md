@@ -14,6 +14,8 @@ python3 -m http.server 4173
 
 Aplikasi memakai Supabase Authentication. Setelah login, nama dan posisi pengguna dibaca dari tabel `profiles`.
 
+Login menerima username atau email. Jika pengguna mengetik username tanpa `@`, aplikasi otomatis memakai email internal `username@telurku.local` untuk Supabase Auth.
+
 Data contoh transaksi masih tersimpan di browser melalui `localStorage` sampai tahap penyimpanan operasional dialihkan penuh ke tabel Supabase.
 
 Sistem digunakan untuk pencatatan baru. Tidak ada proses migrasi atau impor data lama.
