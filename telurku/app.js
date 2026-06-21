@@ -122,7 +122,14 @@ function currentUser() {
   if (authState.profile) return { name: authState.profile.full_name, initials: initials(authState.profile.full_name) };
   return roleUsers[state.role];
 }
-function assignedCage(userName = currentUser().name) { return db.cages.find(c => c.keeper === userName); }
+function assignedCage(userName = currentUser().name) {
+  const assignment = authState.profile?.assignment;
+  if (state.role === "kandang" && assignment) {
+    const assigned = db.cages.find(c => c.name === assignment);
+    if (assigned) return assigned;
+  }
+  return db.cages.find(c => c.keeper === userName);
+}
 function sum(list, key) { return list.reduce((a, item) => a + Number(typeof key === "function" ? key(item) : item[key] || 0), 0); }
 function escapeHtml(v = "") { return String(v).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
 function loginToEmail(value = "") {
@@ -501,7 +508,7 @@ async function loadAuthProfile() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, full_name, role, is_active")
+    .select("id, auth_email, full_name, role, assignment, is_active")
     .eq("id", session.user.id)
     .single();
 
