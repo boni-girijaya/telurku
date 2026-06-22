@@ -61,7 +61,7 @@ create table public.deposits (
   cage_id bigint not null references public.cages(id),
   trip_no integer not null check (trip_no > 0),
   trip_id uuid references public.pickup_trips(id),
-  reported_pieces integer not null check (reported_pieces > 0),
+  reported_pieces integer not null check (reported_pieces >= 0),
   actual_pieces integer check (actual_pieces >= 0),
   net_weight_kg numeric(10,2) check (net_weight_kg > 0),
   reporter_id uuid not null references public.profiles(id),
@@ -155,6 +155,9 @@ create policy "users read allowed deposits" on public.deposits for select to aut
 create policy "keepers create deposits" on public.deposits for insert to authenticated with check (
   public.my_role() = 'kandang' and reporter_id = auth.uid()
   and exists (select 1 from public.cages where cages.id = deposits.cage_id and cages.keeper_id = auth.uid())
+);
+create policy "reception and admin create direct deposits" on public.deposits for insert to authenticated with check (
+  public.my_role() in ('owner','penerimaan','admin') and reporter_id = auth.uid()
 );
 create policy "keepers edit waiting deposits" on public.deposits for update to authenticated using (
   public.my_role() = 'kandang' and reporter_id = auth.uid() and status = 'waiting'

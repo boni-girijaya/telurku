@@ -30,6 +30,8 @@ Untuk mengizinkan Owner dan Admin mengelola daftar supir dari aplikasi, jalankan
 
 Untuk membuka kontrol Ubah/Batalkan setoran dari menu Owner, jalankan `supabase/migrations/2026-06-22-correction-control.sql` satu kali di SQL Editor.
 
+Untuk mengaktifkan input kg langsung dari Kepala Penerimaan, Admin, dan Owner, jalankan `supabase/migrations/2026-06-22-direct-weight-input.sql` satu kali di SQL Editor.
+
 ## Deployment
 
 Folder ini dapat dipublikasikan langsung ke Netlify. Sebelum digunakan secara operasional, sambungkan autentikasi dan penyimpanan ke Supabase menggunakan skema `supabase/schema.sql`.
