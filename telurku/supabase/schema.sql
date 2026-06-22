@@ -87,6 +87,12 @@ create table public.daily_gradings (
   updated_at timestamptz not null default now()
 );
 
+create table public.app_settings (
+  key text primary key,
+  value jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 create table public.audit_logs (
   id bigint generated always as identity primary key,
   actor_id uuid references public.profiles(id),
@@ -105,6 +111,7 @@ alter table public.drivers enable row level security;
 alter table public.pickup_trips enable row level security;
 alter table public.deposits enable row level security;
 alter table public.daily_gradings enable row level security;
+alter table public.app_settings enable row level security;
 alter table public.audit_logs enable row level security;
 
 create or replace function public.my_role() returns public.app_role
@@ -138,9 +145,9 @@ create policy "owner deletes managed passwords" on public.profile_passwords for 
 create policy "active users read cages" on public.cages for select to authenticated using (public.my_role() is not null);
 create policy "owner and admin manage cages" on public.cages for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "operations read drivers" on public.drivers for select to authenticated using (public.my_role() in ('owner','penerimaan','admin'));
-create policy "owner manages drivers" on public.drivers for all to authenticated using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
+create policy "owner and admin manage drivers" on public.drivers for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "operations read trips" on public.pickup_trips for select to authenticated using (public.my_role() is not null);
-create policy "reception manages trips" on public.pickup_trips for all to authenticated using (public.my_role() in ('owner','penerimaan')) with check (public.my_role() in ('owner','penerimaan'));
+create policy "reception and admin manage trips" on public.pickup_trips for all to authenticated using (public.my_role() in ('owner','penerimaan','admin')) with check (public.my_role() in ('owner','penerimaan','admin'));
 
 create policy "users read allowed deposits" on public.deposits for select to authenticated using (
   public.my_role() in ('owner','penerimaan','gudang','admin') or reporter_id = auth.uid()
@@ -152,13 +159,24 @@ create policy "keepers create deposits" on public.deposits for insert to authent
 create policy "keepers edit waiting deposits" on public.deposits for update to authenticated using (
   public.my_role() = 'kandang' and reporter_id = auth.uid() and status = 'waiting'
 );
-create policy "reception updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','penerimaan'));
+create policy "reception and admin updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','penerimaan','admin'));
 
 create policy "active users read gradings" on public.daily_gradings for select to authenticated using (public.my_role() is not null);
 create policy "warehouse manages gradings" on public.daily_gradings for all to authenticated using (public.my_role() in ('owner','gudang')) with check (public.my_role() in ('owner','gudang'));
+create policy "active users read app settings" on public.app_settings for select to authenticated using (public.my_role() is not null);
+create policy "owner manages app settings" on public.app_settings for all to authenticated using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
 create policy "owner reads audit" on public.audit_logs for select to authenticated using (public.my_role() = 'owner');
 
 insert into public.cages (code, name)
 select 'K' || lpad(i::text, 2, '0'), 'Kandang ' || i
 from generate_series(1, 30) as i
 on conflict (code) do nothing;
+
+insert into public.drivers (name)
+select name
+from (values ('Budi Santoso'), ('Agus Salim'), ('Joko Susilo')) as seed(name)
+where not exists (select 1 from public.drivers where drivers.name = seed.name);
+
+insert into public.app_settings (key, value)
+values ('corrections_enabled', '{"enabled": false}'::jsonb)
+on conflict (key) do nothing;

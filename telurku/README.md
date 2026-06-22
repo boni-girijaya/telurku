@@ -16,13 +16,19 @@ Aplikasi memakai Supabase Authentication. Setelah login, nama dan posisi penggun
 
 Login menerima username atau email. Jika pengguna mengetik username tanpa `@`, aplikasi otomatis memakai email internal `username@telurku.local` untuk Supabase Auth.
 
-Data contoh transaksi masih tersimpan di browser melalui `localStorage` sampai tahap penyimpanan operasional dialihkan penuh ke tabel Supabase.
+Data operasional baru disimpan ke tabel Supabase: kandang, setoran, penerimaan trip, dan grading harian. Browser tetap menyimpan cache ringan agar tampilan tidak kosong saat halaman memuat.
 
 Sistem digunakan untuk pencatatan baru. Tidak ada proses migrasi atau impor data lama.
 
 Owner dapat melihat dan mengatur password semua pengguna. Admin hanya dapat melihat dan mengatur password Anak Kandang, Kepala Penerimaan, dan Kepala Gudang; password Owner dan Admin lain tetap dilindungi.
 
 Untuk project Supabase yang sudah dibuat sebelum kolom email dan penugasan ditambahkan, jalankan file `supabase/migrations/2026-06-21-profile-email-assignment.sql` di SQL Editor.
+
+Setelah fitur operasional aktif, jalankan juga `supabase/migrations/2026-06-22-operational-sync.sql` satu kali di SQL Editor. File ini menambahkan supir awal dan mengikat user Anak Kandang ke tabel kandang berdasarkan kolom `assignment`.
+
+Untuk mengizinkan Owner dan Admin mengelola daftar supir dari aplikasi, jalankan `supabase/migrations/2026-06-22-driver-admin-management.sql` satu kali di SQL Editor.
+
+Untuk membuka kontrol Ubah/Batalkan setoran dari menu Owner, jalankan `supabase/migrations/2026-06-22-correction-control.sql` satu kali di SQL Editor.
 
 ## Deployment
 

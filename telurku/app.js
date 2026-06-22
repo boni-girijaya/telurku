@@ -12,11 +12,11 @@ const roleLabels = {
 };
 
 const navByRole = {
-  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["kandang", "▦", "Kandang"], ["users", "♙", "Pengguna"]],
+  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
   kandang: [["setoran", "+", "Setor"], ["riwayat", "◷", "Riwayat"]],
   penerimaan: [["antrian", "✓", "Penerimaan"], ["riwayat", "◷", "Riwayat"]],
   gudang: [["grading", "◫", "Grading"], ["riwayat", "◷", "Riwayat"]],
-  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["kandang", "▦", "Kandang"], ["users", "♙", "Pengguna"]],
+  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
 };
 
 const roleUsers = {
@@ -47,6 +47,8 @@ const dbRoleToLabel = {
 
 const labelToDbRole = Object.fromEntries(Object.entries(dbRoleToLabel).map(([key, value]) => [value, key]));
 const INTERNAL_EMAIL_DOMAIN = "telurku.local";
+const cageStatusToDb = { Aktif: "aktif", "Belum Bertelur": "belum_bertelur", Afkir: "afkir", Kosong: "kosong", Perawatan: "perawatan" };
+const dbCageStatusToLabel = Object.fromEntries(Object.entries(cageStatusToDb).map(([key, value]) => [value, key]));
 
 function seedData() {
   const statuses = ["Aktif", "Aktif", "Aktif", "Belum Bertelur", "Aktif", "Aktif", "Afkir", "Aktif"];
@@ -83,7 +85,13 @@ function seedData() {
     cages,
     reports,
     grading: { A: 210.5, B: 128.4, C: 38.2, D: 19.6, E: 4.3, note: "Afkir ditimbang dari ember merah", closed: false, author: "Siti Aminah" },
+    driverRows: [
+      { id: 1, name: "Budi Santoso", is_active: true },
+      { id: 2, name: "Agus Salim", is_active: true },
+      { id: 3, name: "Joko Susilo", is_active: true },
+    ],
     drivers: ["Budi Santoso", "Agus Salim", "Joko Susilo"],
+    settings: { correctionsEnabled: false },
     users: [
       ["Bapak Antoni", "Owner", "Semua akses", "Aktif", "Owner#2026"],
       ["Andi Pratama", "Anak Kandang", "Kandang 1", "Aktif", "Kandang01"],
@@ -98,7 +106,7 @@ function seedData() {
 }
 
 let db = loadData();
-let state = { role: "owner", page: "dashboard", selectedReport: null, selectedTrip: null, editCageId: null, editUserId: null, showUserForm: false };
+let state = { role: "owner", page: "dashboard", selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
 let authState = { loading: true, session: null, profile: null, error: "" };
 window.telurkuSupabase = supabase;
 
@@ -118,6 +126,7 @@ function fmt(n, digits = 0) { return new Intl.NumberFormat("id-ID", { maximumFra
 function dateLong(value = today) { return new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${value}T12:00:00`)); }
 function cage(id) { return db.cages.find(c => c.id === Number(id)); }
 function initials(name = "") { return name.split(" ").filter(Boolean).map(x => x[0]).slice(0, 2).join("").toUpperCase() || "TK"; }
+function timeShort(value) { return value ? new Date(value).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : ""; }
 function currentUser() {
   if (authState.profile) return { name: authState.profile.full_name, initials: initials(authState.profile.full_name) };
   return roleUsers[state.role];
@@ -143,7 +152,7 @@ function emailToLogin(value = "") {
     : String(value);
 }
 function statusBadge(status) {
-  const map = { received: ["done", "Selesai"], waiting: ["wait", "Menunggu"], issue: ["issue", "Selisih"], Aktif: ["done", "Aktif"], Afkir: ["issue", "Afkir"], "Belum Bertelur": ["wait", "Belum bertelur"], Kosong: ["info", "Kosong"] };
+  const map = { received: ["done", "Selesai"], waiting: ["wait", "Menunggu"], cancelled: ["issue", "Dibatalkan"], issue: ["issue", "Selisih"], Aktif: ["done", "Aktif"], Nonaktif: ["wait", "Nonaktif"], Afkir: ["issue", "Afkir"], "Belum Bertelur": ["wait", "Belum bertelur"], Kosong: ["info", "Kosong"] };
   const item = map[status] || ["info", status];
   return `<span class="badge ${item[0]}"><i class="dot"></i>${item[1]}</span>`;
 }
@@ -205,8 +214,82 @@ async function loadUsersFromSupabase() {
   db.users = profiles.map(profile => profileToUser(profile, passwordMap));
 }
 
+async function loadOperationalData() {
+  const [{ data: profiles }, { data: cages, error: cageError }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name, role, assignment, is_active"),
+    supabase.from("cages").select("id, code, name, status, note, keeper_id").order("id", { ascending: true }),
+  ]);
+  if (cageError) throw cageError;
+
+  const profileMap = new Map((profiles || []).map(profile => [profile.id, profile]));
+  db.cages = (cages || []).map(c => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    status: dbCageStatusToLabel[c.status] || "Aktif",
+    note: c.note || "",
+    keeperId: c.keeper_id || "",
+    keeper: profileMap.get(c.keeper_id)?.full_name || "Belum ditentukan",
+  }));
+
+  const [{ data: deposits, error: depositError }, { data: trips }, { data: drivers }, { data: gradings }, { data: settings }] = await Promise.all([
+    supabase.from("deposits").select("id, reference_no, report_date, reported_at, cage_id, trip_no, trip_id, reported_pieces, actual_pieces, net_weight_kg, reporter_id, status, note").eq("report_date", today).order("reported_at", { ascending: false }),
+    supabase.from("pickup_trips").select("id, trip_date, trip_no, driver_id, receiver_id").eq("trip_date", today),
+    supabase.from("drivers").select("id, name, is_active").order("name", { ascending: true }),
+    supabase.from("daily_gradings").select("*").eq("grading_date", today).limit(1),
+    supabase.from("app_settings").select("key, value").in("key", ["corrections_enabled"]),
+  ]);
+  if (depositError) throw depositError;
+
+  const tripMap = new Map((trips || []).map(trip => [trip.id, trip]));
+  const driverMap = new Map((drivers || []).map(driver => [driver.id, driver]));
+  if (drivers?.length) {
+    db.driverRows = drivers;
+    db.drivers = drivers.filter(driver => driver.is_active).map(driver => driver.name);
+  }
+
+  db.reports = (deposits || []).map(row => {
+    const trip = row.trip_id ? tripMap.get(row.trip_id) : null;
+    return {
+      uuid: row.id,
+      id: row.reference_no,
+      date: row.report_date,
+      time: timeShort(row.reported_at),
+      cageId: row.cage_id,
+      trip: row.trip_no,
+      reported: row.reported_pieces,
+      actual: row.actual_pieces,
+      weight: row.net_weight_kg == null ? null : Number(row.net_weight_kg),
+      driver: trip?.driver_id ? driverMap.get(trip.driver_id)?.name || null : null,
+      status: row.status,
+      reporter: profileMap.get(row.reporter_id)?.full_name || "Petugas",
+      receiver: trip?.receiver_id ? profileMap.get(trip.receiver_id)?.full_name || null : null,
+      note: row.note || "",
+    };
+  });
+
+  const grading = gradings?.[0];
+  if (grading) {
+    db.grading = {
+      A: Number(grading.grade_a_kg || 0),
+      B: Number(grading.grade_b_kg || 0),
+      C: Number(grading.grade_c_kg || 0),
+      D: Number(grading.grade_d_kg || 0),
+      E: Number(grading.grade_e_kg || 0),
+      note: grading.note || "",
+      closed: !!grading.is_closed,
+      author: profileMap.get(grading.author_id)?.full_name || "",
+    };
+  } else {
+    db.grading = { A: 0, B: 0, C: 0, D: 0, E: 0, note: "", closed: false, author: "" };
+  }
+  const correctionSetting = (settings || []).find(item => item.key === "corrections_enabled");
+  db.settings = { ...(db.settings || {}), correctionsEnabled: correctionSetting?.value?.enabled === true };
+  saveData();
+}
+
 function titleForPage() {
-  return { dashboard: "Ringkasan Operasional", setoran: "Setoran Telur", antrian: "Penerimaan Telur", grading: "Grading Gudang", laporan: "Laporan Produksi", kandang: "Master Kandang", users: "Pengguna & Akses", riwayat: "Riwayat Transaksi" }[state.page];
+  return { dashboard: "Ringkasan Operasional", setoran: "Setoran Telur", antrian: "Penerimaan Telur", grading: "Grading Gudang", laporan: "Laporan Produksi", kandang: "Master Kandang", drivers: "Supir", users: "Pengguna & Akses", settings: "Kontrol", riwayat: "Riwayat Transaksi" }[state.page];
 }
 
 function loginPage(message = "") {
@@ -267,7 +350,7 @@ function dashboardPage() {
     </div>
     <div class="grid cols-2">
       <div><div class="section-head"><div><h2>Produksi tertinggi</h2><p>Berat bersih per setoran kandang</p></div></div>
-        <div class="card card-pad"><div class="progress-list">${topCages.map((r,i) => `<div class="progress-row"><b>${cage(r.cageId).name}</b><div class="bar"><i style="width:${Math.round(r.weight/topCages[0].weight*100)}%"></i></div><span>${fmt(r.weight,1)} kg</span></div>`).join("")}</div></div>
+        <div class="card card-pad"><div class="progress-list">${topCages.length ? topCages.map(r => `<div class="progress-row"><b>${cage(r.cageId)?.name || "Kandang"}</b><div class="bar"><i style="width:${Math.round(r.weight/topCages[0].weight*100)}%"></i></div><span>${fmt(r.weight,1)} kg</span></div>`).join("") : empty("Belum ada setoran diterima")}</div></div>
       </div>
       <div><div class="section-head"><div><h2>Berat per grade</h2><p>Acuan input Accurate hari ini</p></div></div>
         <div class="card card-pad"><div class="grade-grid">${["A","B","C","D","E"].map(g => `<div class="grade-box ${g === "E" ? "e" : ""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div><div class="hint" style="margin-top:14px">Total grading ${fmt(gradeTotal,1)} kg · Selisih terhadap timbang ${fmt(weight-gradeTotal,1)} kg</div></div>
@@ -277,6 +360,37 @@ function dashboardPage() {
 }
 
 function stat(label, value, sub, icon) { return `<div class="stat"><div class="stat-head"><span>${label}</span><span class="stat-icon">${icon}</span></div><strong>${value}</strong><small>${sub}</small></div>`; }
+
+function correctionsEnabled() {
+  return db.settings?.correctionsEnabled === true;
+}
+
+function canCorrectReport(report) {
+  if (!correctionsEnabled() || !report?.uuid || report.status === "cancelled") return false;
+  if (state.role === "kandang") return report.status === "waiting" && report.reporter === currentUser().name;
+  return ["owner", "admin", "penerimaan"].includes(state.role);
+}
+
+function reportActions(report) {
+  if (!canCorrectReport(report)) return "";
+  return `<button class="btn btn-outline" data-edit-report="${report.uuid}">Ubah</button> <button class="btn btn-outline" data-cancel-report="${report.uuid}">Batalkan</button>`;
+}
+
+function correctionForm() {
+  const report = db.reports.find(r => r.uuid === state.editReportId);
+  if (!report || !canCorrectReport(report)) return "";
+  const isKeeper = state.role === "kandang";
+  return `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">Ubah setoran ${escapeHtml(report.id)}</div><p class="card-sub">${escapeHtml(cage(report.cageId)?.name || "Kandang")} · perubahan akan tersimpan sebagai koreksi</p>
+    <form id="correction-form" style="margin-top:20px">
+      <div class="form-row">
+        <div class="form-group"><label>Trip</label><select name="trip">${[1,2,3,4].map(n=>`<option value="${n}" ${report.trip===n?"selected":""}>Trip ${n}</option>`).join("")}</select></div>
+        <div class="form-group"><label>Jumlah dilaporkan</label><input name="reported" type="number" min="1" value="${report.reported}" required /></div>
+      </div>
+      ${isKeeper ? "" : `<div class="form-row"><div class="form-group"><label>Jumlah aktual</label><input name="actual" type="number" min="0" value="${report.actual ?? ""}" /></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight" type="number" min="0.1" step="0.1" value="${report.weight ?? ""}" /></div></div><div class="form-row"><div class="form-group"><label>Supir</label><select name="driver"><option value="">Belum dipilih</option>${db.drivers.map(d=>`<option ${report.driver===d?"selected":""}>${escapeHtml(d)}</option>`).join("")}</select></div><div class="form-group"><label>Status</label><select name="status"><option value="waiting" ${report.status==="waiting"?"selected":""}>Menunggu</option><option value="received" ${report.status==="received"?"selected":""}>Selesai</option></select></div></div>`}
+      <div class="form-group"><label>Catatan koreksi</label><textarea name="note" placeholder="Tuliskan alasan koreksi">${escapeHtml(report.note || "")}</textarea></div>
+      <div class="form-row"><button type="button" class="btn btn-outline" id="cancel-correction">Batal</button><button class="btn btn-primary">Simpan koreksi</button></div>
+    </form></div></div>`;
+}
 
 function setoranPage() {
   const assigned = assignedCage();
@@ -294,12 +408,13 @@ function setoranPage() {
       <button class="btn btn-primary btn-block" style="margin-top:18px">Kirim Setoran</button>
     </form></div>
     <div class="section-head"><div><h2>Setoran saya hari ini</h2><p>${db.reports.filter(r=>r.reporter===currentUser().name).length} laporan</p></div></div>
+    ${correctionForm()}
     <div class="queue">${db.reports.filter(r=>r.reporter===currentUser().name).map(reportCard).join("") || empty("Belum ada setoran")}</div></div>`;
 }
 
 function reportCard(r) {
   const c = cage(r.cageId);
-  return `<article class="queue-card"><div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h3>${c.name} · Trip ${r.trip}</h3>${statusBadge(r.status)}</div><p>${r.id} · dilaporkan ${r.reporter} pukul ${r.time}</p><div class="queue-meta"><span><b>${fmt(r.reported)}</b> butir dilaporkan</span>${r.actual != null ? `<span><b>${fmt(r.actual)}</b> butir diterima</span>` : ""}${r.weight != null ? `<span><b>${fmt(r.weight,1)}</b> kg</span>` : ""}${r.driver ? `<span>Supir: <b>${r.driver}</b></span>` : ""}</div></div></article>`;
+  return `<article class="queue-card"><div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h3>${c.name} · Trip ${r.trip}</h3>${statusBadge(r.status)}</div><p>${r.id} · dilaporkan ${r.reporter} pukul ${r.time}</p><div class="queue-meta"><span><b>${fmt(r.reported)}</b> butir dilaporkan</span>${r.actual != null ? `<span><b>${fmt(r.actual)}</b> butir diterima</span>` : ""}${r.weight != null ? `<span><b>${fmt(r.weight,1)}</b> kg</span>` : ""}${r.driver ? `<span>Supir: <b>${r.driver}</b></span>` : ""}</div></div>${reportActions(r) ? `<div>${reportActions(r)}</div>` : ""}</article>`;
 }
 
 function antrianPage() {
@@ -340,10 +455,11 @@ function laporanPage() {
   const received = db.reports.filter(r=>r.status==="received");
   const mismatch = received.filter(r=>r.actual!==r.reported);
   const weight = sum(received,"weight");
+  const receivedPieces = sum(received,"actual");
   const gradeLabels = { A: "Bagus", B: "Putih", C: "Retak", D: "Hancur", E: "Afkir" };
   const gradeTotal = ["A","B","C","D","E"].reduce((a,g)=>a+Number(db.grading[g]||0),0);
   return `<div class="section-head"><div><h2>Laporan ${dateLong()}</h2><p>Rekap produksi, penerimaan, dan pertanggungjawaban petugas</p></div><button class="btn btn-outline" id="export-csv">⇩ Unduh CSV</button></div>
-    <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(sum(received,"actual"))} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmt(weight,1)} kg`, `Rata-rata ${fmt(weight*1000/sum(received,"actual"),1)} g/butir`, "▣")}${stat("Total grading", `${fmt(gradeTotal,1)} kg`, `Selisih ${fmt(weight-gradeTotal,1)} kg`, "◫")}</div>
+    <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(receivedPieces)} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmt(weight,1)} kg`, receivedPieces ? `Rata-rata ${fmt(weight*1000/receivedPieces,1)} g/butir` : "Belum ada penerimaan", "▣")}${stat("Total grading", `${fmt(gradeTotal,1)} kg`, `Selisih ${fmt(weight-gradeTotal,1)} kg`, "◫")}</div>
     <div class="section-head"><div><h2>Berat per grade</h2><p>Rekap kilogram hasil grading A sampai E</p></div></div>
     <div class="card card-pad"><div class="grade-grid report-grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div></div>
     ${recentTable(db.reports)}
@@ -352,7 +468,8 @@ function laporanPage() {
 }
 
 function recentTable(rows) {
-  return `<div class="section-head"><div><h2>Detail setoran</h2><p>Jejak lengkap per kandang dan petugas</p></div></div><div class="card table-wrap"><table><thead><tr><th>Kandang / Trip</th><th>Pelapor</th><th>Dilaporkan</th><th>Diterima</th><th>Berat</th><th>Supir</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${cage(r.cageId).name}</b><br><small>${r.id} · Trip ${r.trip}</small></td><td>${r.reporter}</td><td>${fmt(r.reported)} butir</td><td>${r.actual==null?"–":`${fmt(r.actual)} butir`}</td><td>${r.weight==null?"–":`${fmt(r.weight,1)} kg`}</td><td>${r.driver||"–"}</td><td>${statusBadge(r.status)}</td></tr>`).join("")}</tbody></table></div>`;
+  const showActions = rows.some(r => canCorrectReport(r));
+  return `${correctionForm()}<div class="section-head"><div><h2>Detail setoran</h2><p>Jejak lengkap per kandang dan petugas</p></div></div><div class="card table-wrap"><table><thead><tr><th>Kandang / Trip</th><th>Pelapor</th><th>Dilaporkan</th><th>Diterima</th><th>Berat</th><th>Supir</th><th>Status</th>${showActions ? "<th></th>" : ""}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${cage(r.cageId)?.name || "Kandang"}</b><br><small>${r.id} · Trip ${r.trip}</small></td><td>${r.reporter}</td><td>${fmt(r.reported)} butir</td><td>${r.actual==null?"–":`${fmt(r.actual)} butir`}</td><td>${r.weight==null?"–":`${fmt(r.weight,1)} kg`}</td><td>${r.driver||"–"}</td><td>${statusBadge(r.status)}</td>${showActions ? `<td>${reportActions(r)}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function cagesPage() {
@@ -360,6 +477,26 @@ function cagesPage() {
   const keepers = db.users.filter(u=>u.role==="Anak Kandang" && u.status==="Aktif");
   return `${editing ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">Ubah ${editing.code}</div><p class="card-sub">Perubahan akan tercatat atas nama ${currentUser().name}</p><form id="cage-form" style="margin-top:20px"><div class="form-group"><label>Nama kandang</label><input name="name" value="${escapeHtml(editing.name)}" required /></div><div class="form-row"><div class="form-group"><label>Status</label><select name="status">${["Aktif","Belum Bertelur","Afkir","Kosong","Perawatan"].map(s=>`<option ${editing.status===s?"selected":""}>${s}</option>`).join("")}</select></div><div class="form-group"><label>Anak kandang</label><select name="keeper">${keepers.map(u=>`<option ${editing.keeper===u.name?"selected":""}>${escapeHtml(u.name)}</option>`).join("")}</select></div></div><div class="form-group"><label>Catatan</label><textarea name="note">${escapeHtml(editing.note)}</textarea></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-cage">Batal</button><button class="btn btn-primary">Simpan perubahan</button></div></form></div></div>` : ""}
   <div class="section-head"><div><h2>30 kandang</h2><p>Nama, status, catatan, dan penanggung jawab</p></div><span class="badge info">Owner & Admin</span></div><div class="card table-wrap"><table><thead><tr><th>Kandang</th><th>Nama</th><th>Status</th><th>Anak kandang</th><th>Catatan</th><th></th></tr></thead><tbody>${db.cages.map(c=>`<tr><td><b>${c.code}</b></td><td>${c.name}</td><td>${statusBadge(c.status)}</td><td>${c.keeper}</td><td>${c.note||"–"}</td><td><button class="btn btn-outline" data-edit-cage="${c.id}">Ubah</button></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function driversPage() {
+  const rows = db.driverRows || [];
+  const editing = rows.find(driver => Number(driver.id) === Number(state.editDriverId));
+  const showForm = state.showDriverForm || editing;
+  return `${showForm ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">${editing ? "Ubah supir" : "Tambah supir"}</div><p class="card-sub">Supir aktif akan muncul di pilihan penerimaan trip.</p><form id="driver-form" style="margin-top:20px"><div class="form-row"><div class="form-group"><label>Nama supir</label><input name="name" value="${escapeHtml(editing?.name || "")}" required /></div><div class="form-group"><label>Status</label><select name="status"><option value="active" ${editing?.is_active !== false ? "selected" : ""}>Aktif</option><option value="inactive" ${editing?.is_active === false ? "selected" : ""}>Nonaktif</option></select></div></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-driver">Batal</button><button class="btn btn-primary">Simpan supir</button></div></form></div></div>` : ""}
+  <div class="section-head"><div><h2>Daftar supir</h2><p>Kelola nama supir yang dipakai saat proses penerimaan trip</p></div><button class="btn btn-primary" id="add-driver">+ Tambah supir</button></div>
+  <div class="card table-wrap"><table><thead><tr><th>Nama supir</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(driver=>`<tr><td><b>${escapeHtml(driver.name)}</b></td><td>${statusBadge(driver.is_active ? "Aktif" : "Nonaktif")}</td><td><button class="btn btn-outline" data-edit-driver="${driver.id}">Ubah</button> <button class="btn btn-outline" data-toggle-driver="${driver.id}">${driver.is_active ? "Nonaktifkan" : "Aktifkan"}</button></td></tr>`).join("") || `<tr><td colspan="3">${empty("Belum ada supir")}</td></tr>`}</tbody></table></div>`;
+}
+
+function settingsPage() {
+  const enabled = correctionsEnabled();
+  return `<div class="section-head"><div><h2>Kontrol koreksi setoran</h2><p>Owner dapat membuka atau mengunci tombol ubah dan batalkan setoran.</p></div></div>
+    <div class="card card-pad">
+      <div class="card-title">${enabled ? "Koreksi sedang aktif" : "Koreksi sedang terkunci"}</div>
+      <p class="card-sub">${enabled ? "Tombol Ubah dan Batalkan tampil sesuai hak akses masing-masing posisi." : "Tombol Ubah dan Batalkan disembunyikan dari semua posisi."}</p>
+      <div class="hint" style="margin:18px 0">Saat aktif, Anak Kandang hanya bisa mengubah atau membatalkan setoran sendiri yang masih menunggu. Kepala Penerimaan, Admin, dan Owner bisa melakukan koreksi operasional.</div>
+      <button class="btn ${enabled ? "btn-outline" : "btn-primary"}" id="toggle-corrections">${enabled ? "Kunci menu koreksi" : "Aktifkan menu koreksi"}</button>
+    </div>`;
 }
 
 function usersPage() {
@@ -391,7 +528,7 @@ function render() {
     bindAuthEvents();
     return;
   }
-  const pages = { dashboard:dashboardPage,setoran:setoranPage,antrian:antrianPage,grading:gradingPage,laporan:laporanPage,kandang:cagesPage,users:usersPage,riwayat:historyPage };
+  const pages = { dashboard:dashboardPage,setoran:setoranPage,antrian:antrianPage,grading:gradingPage,laporan:laporanPage,kandang:cagesPage,drivers:driversPage,users:usersPage,settings:settingsPage,riwayat:historyPage };
   document.querySelector("#app").innerHTML = shell((pages[state.page]||dashboardPage)());
   bindEvents();
 }
@@ -419,22 +556,38 @@ function bindAuthEvents() {
 function bindEvents() {
   document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=()=>{state.page=el.dataset.nav;state.selectedReport=null;state.selectedTrip=null;render();window.scrollTo(0,0)});
   document.querySelector("#logout-btn")?.addEventListener("click", async()=>{await supabase.auth.signOut();authState={ loading:false, session:null, profile:null, error:"" };render()});
-  document.querySelector("#setoran-form")?.addEventListener("submit", e=>{
-    e.preventDefault(); const fd=new FormData(e.currentTarget); const now=new Date();
-    const item={id:`ST-${String(db.reports.length+1).padStart(3,"0")}`,date:today,time:now.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"}),cageId:Number(fd.get("cageId")),trip:Number(fd.get("trip")),reported:Number(fd.get("reported")),actual:null,weight:null,driver:null,status:"waiting",reporter:currentUser().name,receiver:null,note:fd.get("note")};
-    db.reports.unshift(item);audit(`membuat setoran ${item.id} sebanyak ${fmt(item.reported)} butir`);render();toast("Setoran berhasil dikirim");
+  document.querySelector("#setoran-form")?.addEventListener("submit", async e=>{
+    e.preventDefault(); const fd=new FormData(e.currentTarget);
+    const values={cageId:Number(fd.get("cageId")),trip:Number(fd.get("trip")),reported:Number(fd.get("reported")),note:String(fd.get("note")||"").trim()};
+    try {
+      const reference = await saveDepositToSupabase(values);
+      await loadOperationalData();
+      audit(`membuat setoran ${reference} sebanyak ${fmt(values.reported)} butir`);
+      render();
+      toast("Setoran berhasil dikirim ke Supabase");
+    } catch (error) {
+      toast(error.message || "Gagal mengirim setoran");
+    }
   });
   document.querySelectorAll("[data-receive-trip]").forEach(el=>el.onclick=()=>{state.selectedTrip=Number(el.dataset.receiveTrip);render();window.scrollTo(0,0)});
   document.querySelector("#back-queue")?.addEventListener("click",()=>{state.selectedTrip=null;render()});
-  document.querySelector("#receive-trip-form")?.addEventListener("submit",e=>{
+  document.querySelector("#receive-trip-form")?.addEventListener("submit",async e=>{
     e.preventDefault();const fd=new FormData(e.currentTarget);const rows=db.reports.filter(r=>r.status==="waiting"&&r.trip===state.selectedTrip);const driver=fd.get("driver");
     for(const r of rows){const actual=Number(fd.get(`actual_${r.id}`));const note=String(fd.get(`note_${r.id}`)||"").trim();if(actual!==r.reported&&!note){toast(`Isi catatan selisih untuk ${cage(r.cageId).name}`);return;}}
-    for(const r of rows){Object.assign(r,{actual:Number(fd.get(`actual_${r.id}`)),weight:Number(fd.get(`weight_${r.id}`)),driver,receiver:currentUser().name,note:String(fd.get(`note_${r.id}`)||"").trim(),status:"received"});}
-    audit(`mengonfirmasi Trip ${state.selectedTrip} dengan supir ${driver} (${rows.length} kandang)`);state.selectedTrip=null;render();toast("Seluruh setoran dalam trip berhasil diterima");
+    try {
+      await receiveTripToSupabase(state.selectedTrip, driver, rows, fd);
+      audit(`mengonfirmasi Trip ${state.selectedTrip} dengan supir ${driver} (${rows.length} kandang)`);
+      state.selectedTrip=null;
+      await loadOperationalData();
+      render();
+      toast("Seluruh setoran dalam trip berhasil diterima");
+    } catch (error) {
+      toast(error.message || "Gagal menyimpan penerimaan");
+    }
   });
   const gradingForm=document.querySelector("#grading-form");
   gradingForm?.addEventListener("input",()=>{const fd=new FormData(gradingForm);const total=["A","B","C","D","E"].reduce((a,g)=>a+Number(fd.get(g)||0),0);const incoming=sum(db.reports.filter(r=>r.status==="received"),"weight");document.querySelector("#grade-total").textContent=`${fmt(total,1)} kg`;document.querySelector("#grade-diff").textContent=`${fmt(incoming-total,1)} kg`;document.querySelector("#grade-e").textContent=`${fmt(fd.get("E"),1)} kg`});
-  gradingForm?.addEventListener("submit",e=>{e.preventDefault();const fd=new FormData(e.currentTarget);["A","B","C","D","E"].forEach(g=>db.grading[g]=Number(fd.get(g)||0));db.grading.note=fd.get("note");db.grading.closed=e.submitter?.value==="close";db.grading.author=currentUser().name;audit(db.grading.closed?"menutup laporan grading harian":"menyimpan grading sementara");render();toast(db.grading.closed?"Laporan harian berhasil ditutup":"Grading sementara tersimpan")});
+  gradingForm?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={A:Number(fd.get("A")||0),B:Number(fd.get("B")||0),C:Number(fd.get("C")||0),D:Number(fd.get("D")||0),E:Number(fd.get("E")||0),note:String(fd.get("note")||""),closed:e.submitter?.value==="close"};try{await saveGradingToSupabase(values);await loadOperationalData();audit(values.closed?"menutup laporan grading harian":"menyimpan grading sementara");render();toast(values.closed?"Laporan harian berhasil ditutup":"Grading sementara tersimpan")}catch(error){toast(error.message||"Gagal menyimpan grading")}});
   document.querySelector("#export-csv")?.addEventListener("click",exportCsv);
   document.querySelectorAll("[data-toggle-user]").forEach(el=>el.onclick=async()=>{const u=db.users.find(x=>x.id===el.dataset.toggleUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}const nextStatus=u.status==="Aktif"?"Nonaktif":"Aktif";try{await saveUserToSupabase({...u,status:nextStatus,password:""});await loadUsersFromSupabase();audit(`${nextStatus==="Aktif"?"mengaktifkan":"menonaktifkan"} pengguna ${u.name}`);render();toast("Status pengguna diperbarui")}catch(error){toast(error.message||"Gagal memperbarui status pengguna")}});
   document.querySelector("#add-user")?.addEventListener("click",()=>{state.editUserId=null;state.showUserForm=true;render();window.scrollTo(0,0)});
@@ -446,7 +599,17 @@ function bindEvents() {
   document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const login=String(fd.get("login")).trim();const values={id:existing?.id,name:String(fd.get("name")).trim(),login,email:loginToEmail(login),role:fd.get("role"),assignment:String(fd.get("assignment")).trim(),status:fd.get("status"),password:String(fd.get("password")).trim()};const allowedForSubmit=existing?.role==="Owner"?["Owner"]:(creatableRolesByActor[state.role]||[]);if(!allowedForSubmit.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!values.email){toast("Username / email wajib diisi");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}if(values.role==="Anak Kandang"&&!values.assignment.startsWith("Kandang ")){toast("Pilih satu kandang untuk Anak Kandang");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
   document.querySelectorAll("[data-edit-cage]").forEach(el=>el.onclick=()=>{state.editCageId=Number(el.dataset.editCage);render();window.scrollTo(0,0)});
   document.querySelector("#cancel-cage")?.addEventListener("click",()=>{state.editCageId=null;render()});
-  document.querySelector("#cage-form")?.addEventListener("submit",e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const oldKeeper=c.keeper;const newKeeper=fd.get("keeper");const newName=String(fd.get("name")).trim();if(newKeeper!==oldKeeper){const oldUser=db.users.find(u=>u.name===oldKeeper&&u.role==="Anak Kandang");if(oldUser)oldUser.assignment="Belum ditentukan";db.cages.filter(x=>x.id!==c.id&&x.keeper===newKeeper).forEach(x=>x.keeper="Belum ditentukan");}Object.assign(c,{name:newName,status:fd.get("status"),keeper:newKeeper,note:String(fd.get("note")).trim()});const assignedUser=db.users.find(u=>u.name===newKeeper&&u.role==="Anak Kandang");if(assignedUser)assignedUser.assignment=newName;audit(`memperbarui ${c.code}: ${c.name}`);state.editCageId=null;render();toast("Kandang dan assignment berhasil diperbarui")});
+  document.querySelector("#cage-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const values={name:String(fd.get("name")).trim(),status:String(fd.get("status")),keeper:String(fd.get("keeper")),note:String(fd.get("note")).trim()};try{await saveCageToSupabase(state.editCageId,values);await loadUsersFromSupabase();await loadOperationalData();audit(`memperbarui ${c.code}: ${values.name}`);state.editCageId=null;render();toast("Kandang dan assignment berhasil diperbarui")}catch(error){toast(error.message||"Gagal menyimpan kandang")}});
+  document.querySelector("#add-driver")?.addEventListener("click",()=>{state.editDriverId=null;state.showDriverForm=true;render();window.scrollTo(0,0)});
+  document.querySelectorAll("[data-edit-driver]").forEach(el=>el.onclick=()=>{state.editDriverId=Number(el.dataset.editDriver);state.showDriverForm=false;render();window.scrollTo(0,0)});
+  document.querySelector("#cancel-driver")?.addEventListener("click",()=>{state.editDriverId=null;state.showDriverForm=false;render()});
+  document.querySelectorAll("[data-toggle-driver]").forEach(el=>el.onclick=async()=>{const driver=(db.driverRows||[]).find(d=>Number(d.id)===Number(el.dataset.toggleDriver));if(!driver)return;try{await saveDriverToSupabase({id:driver.id,name:driver.name,isActive:!driver.is_active});await loadOperationalData();audit(`${driver.is_active?"menonaktifkan":"mengaktifkan"} supir ${driver.name}`);render();toast("Status supir diperbarui")}catch(error){toast(error.message||"Gagal memperbarui supir")}});
+  document.querySelector("#driver-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const editing=(db.driverRows||[]).find(d=>Number(d.id)===Number(state.editDriverId));const values={id:editing?.id,name:String(fd.get("name")).trim(),isActive:fd.get("status")==="active"};if(!values.name){toast("Nama supir wajib diisi");return;}try{await saveDriverToSupabase(values);await loadOperationalData();audit(`${editing?"memperbarui":"menambahkan"} supir ${values.name}`);state.editDriverId=null;state.showDriverForm=false;render();toast("Supir tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan supir")}});
+  document.querySelector("#toggle-corrections")?.addEventListener("click",async()=>{if(state.role!=="owner"){toast("Hanya Owner yang bisa mengubah kontrol koreksi");return;}const next=!correctionsEnabled();try{await saveCorrectionSetting(next);await loadOperationalData();audit(next?"membuka menu koreksi setoran":"mengunci menu koreksi setoran");render();toast(next?"Menu koreksi aktif":"Menu koreksi terkunci")}catch(error){toast(error.message||"Gagal menyimpan kontrol koreksi")}});
+  document.querySelectorAll("[data-edit-report]").forEach(el=>el.onclick=()=>{state.editReportId=el.dataset.editReport;render();window.scrollTo(0,0)});
+  document.querySelectorAll("[data-cancel-report]").forEach(el=>el.onclick=async()=>{const report=db.reports.find(r=>r.uuid===el.dataset.cancelReport);if(!canCorrectReport(report)){toast("Koreksi sedang terkunci atau akses tidak sesuai");return;}try{await cancelReportInSupabase(report);await loadOperationalData();audit(`membatalkan setoran ${report.id}`);state.editReportId=null;render();toast("Setoran dibatalkan")}catch(error){toast(error.message||"Gagal membatalkan setoran")}});
+  document.querySelector("#cancel-correction")?.addEventListener("click",()=>{state.editReportId=null;render()});
+  document.querySelector("#correction-form")?.addEventListener("submit",async e=>{e.preventDefault();const report=db.reports.find(r=>r.uuid===state.editReportId);if(!canCorrectReport(report)){toast("Koreksi sedang terkunci atau akses tidak sesuai");return;}const fd=new FormData(e.currentTarget);const actualValue=fd.get("actual");const weightValue=fd.get("weight");const values={trip:Number(fd.get("trip")),reported:Number(fd.get("reported")),actual:actualValue==null||actualValue===""?null:Number(actualValue),weight:weightValue==null||weightValue===""?null:Number(weightValue),driver:String(fd.get("driver")||""),status:String(fd.get("status")||"waiting"),note:String(fd.get("note")||"").trim()};try{await saveReportCorrectionToSupabase(report,values);await loadOperationalData();audit(`mengoreksi setoran ${report.id}`);state.editReportId=null;render();toast("Koreksi setoran tersimpan")}catch(error){toast(error.message||"Gagal menyimpan koreksi")}});
 }
 
 function updateUserAssignmentOptions() {
@@ -479,6 +642,185 @@ async function saveUserToSupabase(values) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "Gagal menyimpan pengguna.");
   return result;
+}
+
+async function saveDepositToSupabase(values) {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user?.id;
+  if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
+  const reference = `ST-${Date.now().toString(36).toUpperCase()}`;
+  const { error } = await supabase.from("deposits").insert({
+    reference_no: reference,
+    report_date: today,
+    cage_id: values.cageId,
+    trip_no: values.trip,
+    reported_pieces: values.reported,
+    reporter_id: userId,
+    note: values.note || "",
+    status: "waiting",
+  });
+  if (error) throw error;
+  return reference;
+}
+
+async function saveCorrectionSetting(enabled) {
+  if (state.role !== "owner") throw new Error("Hanya Owner yang bisa mengubah kontrol koreksi.");
+  const { error } = await supabase.from("app_settings").upsert({
+    key: "corrections_enabled",
+    value: { enabled },
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "key" });
+  if (error) throw error;
+}
+
+async function saveReportCorrectionToSupabase(report, values) {
+  if (!canCorrectReport(report)) throw new Error("Akses koreksi tidak tersedia.");
+  const isKeeper = state.role === "kandang";
+  const update = {
+    trip_no: values.trip,
+    reported_pieces: values.reported,
+    note: values.note,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (!isKeeper) {
+    update.status = values.status;
+    update.actual_pieces = values.status === "received" ? values.actual : null;
+    update.net_weight_kg = values.status === "received" ? values.weight : null;
+    update.trip_id = null;
+
+    if (values.status === "received") {
+      if (values.actual == null || values.weight == null) throw new Error("Jumlah aktual dan berat wajib diisi untuk status selesai.");
+      if (!values.driver) throw new Error("Supir wajib dipilih untuk status selesai.");
+      const driver = (db.driverRows || []).find(d => d.name === values.driver);
+      if (!driver) throw new Error("Supir belum tersedia di Supabase.");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
+      if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
+      const { data: trip, error: tripError } = await supabase
+        .from("pickup_trips")
+        .upsert({
+          trip_date: report.date || today,
+          trip_no: values.trip,
+          driver_id: driver.id,
+          receiver_id: userId,
+          status: "received",
+          received_at: new Date().toISOString(),
+        }, { onConflict: "trip_date,trip_no" })
+        .select("id")
+        .single();
+      if (tripError) throw tripError;
+      update.trip_id = trip.id;
+    }
+  }
+
+  const { error } = await supabase.from("deposits").update(update).eq("id", report.uuid);
+  if (error) throw error;
+}
+
+async function cancelReportInSupabase(report) {
+  if (!canCorrectReport(report)) throw new Error("Akses pembatalan tidak tersedia.");
+  const { error } = await supabase
+    .from("deposits")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", report.uuid);
+  if (error) throw error;
+}
+
+async function receiveTripToSupabase(tripNo, driverName, rows, fd) {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user?.id;
+  if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
+  const driver = (db.driverRows || []).find(d => d.name === driverName);
+  if (!driver) throw new Error("Supir belum tersedia di Supabase.");
+
+  const { data: trip, error: tripError } = await supabase
+    .from("pickup_trips")
+    .upsert({
+      trip_date: today,
+      trip_no: tripNo,
+      driver_id: driver.id,
+      receiver_id: userId,
+      status: "received",
+      received_at: new Date().toISOString(),
+    }, { onConflict: "trip_date,trip_no" })
+    .select("id")
+    .single();
+  if (tripError) throw tripError;
+
+  for (const r of rows) {
+    const actual = Number(fd.get(`actual_${r.id}`));
+    const note = String(fd.get(`note_${r.id}`) || "").trim();
+    const { error } = await supabase
+      .from("deposits")
+      .update({
+        actual_pieces: actual,
+        net_weight_kg: Number(fd.get(`weight_${r.id}`)),
+        trip_id: trip.id,
+        status: "received",
+        note: note || r.note || "",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", r.uuid);
+    if (error) throw error;
+  }
+}
+
+async function saveGradingToSupabase(values) {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user?.id;
+  if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
+  const { error } = await supabase.from("daily_gradings").upsert({
+    grading_date: today,
+    grade_a_kg: values.A,
+    grade_b_kg: values.B,
+    grade_c_kg: values.C,
+    grade_d_kg: values.D,
+    grade_e_kg: values.E,
+    note: values.note,
+    is_closed: values.closed,
+    author_id: userId,
+    closed_at: values.closed ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "grading_date" });
+  if (error) throw error;
+}
+
+async function saveCageToSupabase(cageId, values) {
+  const keeper = db.users.find(u => u.name === values.keeper && u.role === "Anak Kandang");
+  const keeperId = keeper?.id || null;
+  const oldCage = cage(cageId);
+  if (oldCage?.keeperId && oldCage.keeperId !== keeperId) {
+    await supabase.from("profiles").update({ assignment: "Belum ditentukan" }).eq("id", oldCage.keeperId);
+  }
+  if (keeperId) {
+    await supabase.from("cages").update({ keeper_id: null }).eq("keeper_id", keeperId);
+  }
+  const { error } = await supabase
+    .from("cages")
+    .update({
+      name: values.name,
+      status: cageStatusToDb[values.status] || "aktif",
+      note: values.note,
+      keeper_id: keeperId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", cageId);
+  if (error) throw error;
+  if (keeperId) {
+    const { error: profileError } = await supabase.from("profiles").update({ assignment: values.name }).eq("id", keeperId);
+    if (profileError) throw profileError;
+  }
+}
+
+async function saveDriverToSupabase(values) {
+  if (!["owner", "admin"].includes(state.role)) throw new Error("Hanya Owner dan Admin yang bisa mengelola supir.");
+  const payload = { name: values.name, is_active: values.isActive };
+  const query = values.id
+    ? supabase.from("drivers").update(payload).eq("id", values.id)
+    : supabase.from("drivers").insert(payload);
+  const { error } = await query;
+  if (error) throw error;
 }
 
 function syncUserCageAssignment(user, previousName) {
@@ -526,6 +868,7 @@ async function loadAuthProfile() {
   state.role = profile.role;
   if (!navByRole[state.role]?.some(item => item[0] === state.page)) state.page = navByRole[state.role][0][0];
   await loadUsersFromSupabase();
+  await loadOperationalData();
 }
 
 async function init() {
