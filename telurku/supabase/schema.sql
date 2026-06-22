@@ -32,6 +32,13 @@ create table public.cages (
   updated_at timestamptz not null default now()
 );
 
+create table public.cage_assignments (
+  cage_id bigint not null references public.cages(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (cage_id, profile_id)
+);
+
 create table public.drivers (
   id bigint generated always as identity primary key,
   name text not null,
@@ -105,6 +112,7 @@ create table public.audit_logs (
 alter table public.profiles enable row level security;
 alter table public.profile_passwords enable row level security;
 alter table public.cages enable row level security;
+alter table public.cage_assignments enable row level security;
 alter table public.drivers enable row level security;
 alter table public.pickup_trips enable row level security;
 alter table public.deposits enable row level security;
@@ -142,6 +150,8 @@ create policy "owner and admin update managed passwords" on public.profile_passw
 create policy "owner deletes managed passwords" on public.profile_passwords for delete to authenticated using (public.my_role() = 'owner');
 create policy "active users read cages" on public.cages for select to authenticated using (public.my_role() is not null);
 create policy "owner and admin manage cages" on public.cages for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
+create policy "active users read cage assignments" on public.cage_assignments for select to authenticated using (public.my_role() is not null);
+create policy "owner and admin manage cage assignments" on public.cage_assignments for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "operations read drivers" on public.drivers for select to authenticated using (public.my_role() in ('owner','penerimaan','admin'));
 create policy "owner and admin manage drivers" on public.drivers for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "operations read trips" on public.pickup_trips for select to authenticated using (public.my_role() is not null);
@@ -152,7 +162,12 @@ create policy "users read allowed deposits" on public.deposits for select to aut
 );
 create policy "keepers create deposits" on public.deposits for insert to authenticated with check (
   public.my_role() = 'kandang' and reporter_id = auth.uid()
-  and exists (select 1 from public.cages where cages.id = deposits.cage_id and cages.keeper_id = auth.uid())
+  and exists (
+    select 1
+    from public.cage_assignments
+    where cage_assignments.cage_id = deposits.cage_id
+      and cage_assignments.profile_id = auth.uid()
+  )
 );
 create policy "reception and admin create direct deposits" on public.deposits for insert to authenticated with check (
   public.my_role() in ('owner','penerimaan','admin') and reporter_id = auth.uid()
@@ -160,7 +175,7 @@ create policy "reception and admin create direct deposits" on public.deposits fo
 create policy "keepers edit waiting deposits" on public.deposits for update to authenticated using (
   public.my_role() = 'kandang' and reporter_id = auth.uid() and status = 'waiting'
 );
-create policy "reception and admin updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','penerimaan','admin'));
+create policy "owner and admin updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','admin'));
 
 create policy "active users read gradings" on public.daily_gradings for select to authenticated using (public.my_role() is not null);
 create policy "warehouse manages gradings" on public.daily_gradings for all to authenticated using (public.my_role() in ('owner','gudang')) with check (public.my_role() in ('owner','gudang'));
@@ -172,6 +187,12 @@ insert into public.cages (code, name)
 select 'K' || lpad(i::text, 2, '0'), 'Kandang ' || i
 from generate_series(1, 30) as i
 on conflict (code) do nothing;
+
+insert into public.cage_assignments (cage_id, profile_id)
+select id, keeper_id
+from public.cages
+where keeper_id is not null
+on conflict do nothing;
 
 insert into public.drivers (name)
 select name

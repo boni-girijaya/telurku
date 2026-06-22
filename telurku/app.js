@@ -133,7 +133,7 @@ function currentUser() {
 }
 function assignedCages(userName = currentUser().name) {
   if (state.role === "kandang" && authState.profile?.id) {
-    return db.cages.filter(c => c.keeperId === authState.profile.id);
+    return db.cages.filter(c => (c.keeperIds || []).includes(authState.profile.id));
   }
   return db.cages.filter(c => c.keeper === userName);
 }
@@ -219,19 +219,27 @@ function refreshUserAssignmentsFromCages() {
   if (!db.users?.length || !db.cages?.length) return;
   db.users = db.users.map(user => {
     if (user.role !== "Anak Kandang") return user;
-    const assigned = db.cages.filter(c => c.keeperId === user.id).map(c => c.name);
+    const assigned = db.cages.filter(c => (c.keeperIds || []).includes(user.id)).map(c => c.name);
     return { ...user, assignment: assigned.length ? assigned.join(", ") : "Belum ditentukan" };
   });
 }
 
 async function loadOperationalData() {
-  const [{ data: profiles }, { data: cages, error: cageError }] = await Promise.all([
+  const [{ data: profiles }, { data: cages, error: cageError }, { data: assignments, error: assignmentError }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, role, assignment, is_active"),
     supabase.from("cages").select("id, code, name, status, note, keeper_id").order("id", { ascending: true }),
+    supabase.from("cage_assignments").select("cage_id, profile_id"),
   ]);
   if (cageError) throw cageError;
+  if (assignmentError) throw assignmentError;
 
   const profileMap = new Map((profiles || []).map(profile => [profile.id, profile]));
+  const assignmentsByCage = new Map();
+  for (const item of assignments || []) {
+    const list = assignmentsByCage.get(item.cage_id) || [];
+    list.push(item.profile_id);
+    assignmentsByCage.set(item.cage_id, list);
+  }
   db.cages = (cages || []).map(c => ({
     id: c.id,
     code: c.code,
@@ -239,7 +247,11 @@ async function loadOperationalData() {
     status: dbCageStatusToLabel[c.status] || "Aktif",
     note: c.note || "",
     keeperId: c.keeper_id || "",
-    keeper: profileMap.get(c.keeper_id)?.full_name || "Belum ditentukan",
+    keeperIds: assignmentsByCage.get(c.id) || (c.keeper_id ? [c.keeper_id] : []),
+    keeper: (assignmentsByCage.get(c.id) || (c.keeper_id ? [c.keeper_id] : []))
+      .map(id => profileMap.get(id)?.full_name)
+      .filter(Boolean)
+      .join(", ") || "Belum ditentukan",
   }));
   refreshUserAssignmentsFromCages();
 
@@ -378,8 +390,7 @@ function correctionsEnabled() {
 
 function canCorrectReport(report) {
   if (!correctionsEnabled() || !report?.uuid || report.status === "cancelled") return false;
-  if (state.role === "kandang") return report.status === "waiting" && report.reporter === currentUser().name;
-  return ["owner", "admin", "penerimaan"].includes(state.role);
+  return ["owner", "admin"].includes(state.role);
 }
 
 function reportActions(report) {
@@ -509,7 +520,7 @@ function recentTable(rows) {
 function cagesPage() {
   const editing = state.editCageId ? cage(state.editCageId) : null;
   const keepers = db.users.filter(u=>u.role==="Anak Kandang" && u.status==="Aktif");
-  return `${editing ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">Ubah ${editing.code}</div><p class="card-sub">Satu Anak Kandang boleh menangani lebih dari satu kandang.</p><form id="cage-form" style="margin-top:20px"><div class="form-group"><label>Nama kandang</label><input name="name" value="${escapeHtml(editing.name)}" required /></div><div class="form-row"><div class="form-group"><label>Status</label><select name="status">${["Aktif","Belum Bertelur","Afkir","Kosong","Perawatan"].map(s=>`<option ${editing.status===s?"selected":""}>${s}</option>`).join("")}</select></div><div class="form-group"><label>Anak kandang</label><select name="keeper"><option value="">Belum ditentukan</option>${keepers.map(u=>`<option value="${escapeHtml(u.name)}" ${editing.keeper===u.name?"selected":""}>${escapeHtml(u.name)}</option>`).join("")}</select></div></div><div class="form-group"><label>Catatan</label><textarea name="note">${escapeHtml(editing.note)}</textarea></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-cage">Batal</button><button class="btn btn-primary">Simpan perubahan</button></div></form></div></div>` : ""}
+  return `${editing ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">Ubah ${editing.code}</div><p class="card-sub">Satu kandang bisa memiliki lebih dari satu Anak Kandang.</p><form id="cage-form" style="margin-top:20px"><div class="form-group"><label>Nama kandang</label><input name="name" value="${escapeHtml(editing.name)}" required /></div><div class="form-row"><div class="form-group"><label>Status</label><select name="status">${["Aktif","Belum Bertelur","Afkir","Kosong","Perawatan"].map(s=>`<option ${editing.status===s?"selected":""}>${s}</option>`).join("")}</select></div><div class="form-group"><label>Anak kandang</label><select name="keeperIds" multiple size="${Math.min(Math.max(keepers.length, 3), 6)}">${keepers.map(u=>`<option value="${escapeHtml(u.id)}" ${(editing.keeperIds||[]).includes(u.id)?"selected":""}>${escapeHtml(u.name)}</option>`).join("")}</select><div class="hint" style="margin-top:8px">Pilih satu atau beberapa nama. Biarkan kosong jika belum ditentukan.</div></div></div><div class="form-group"><label>Catatan</label><textarea name="note">${escapeHtml(editing.note)}</textarea></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-cage">Batal</button><button class="btn btn-primary">Simpan perubahan</button></div></form></div></div>` : ""}
   <div class="section-head"><div><h2>30 kandang</h2><p>Nama, status, catatan, dan penanggung jawab</p></div><span class="badge info">Owner & Admin</span></div><div class="card table-wrap"><table><thead><tr><th>Kandang</th><th>Nama</th><th>Status</th><th>Anak kandang</th><th>Catatan</th><th></th></tr></thead><tbody>${db.cages.map(c=>`<tr><td><b>${c.code}</b></td><td>${c.name}</td><td>${statusBadge(c.status)}</td><td>${c.keeper}</td><td>${c.note||"–"}</td><td><button class="btn btn-outline" data-edit-cage="${c.id}">Ubah</button></td></tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -528,7 +539,7 @@ function settingsPage() {
     <div class="card card-pad">
       <div class="card-title">${enabled ? "Koreksi sedang aktif" : "Koreksi sedang terkunci"}</div>
       <p class="card-sub">${enabled ? "Tombol Ubah dan Batalkan tampil sesuai hak akses masing-masing posisi." : "Tombol Ubah dan Batalkan disembunyikan dari semua posisi."}</p>
-      <div class="hint" style="margin:18px 0">Saat aktif, Anak Kandang hanya bisa mengubah atau membatalkan setoran sendiri yang masih menunggu. Kepala Penerimaan, Admin, dan Owner bisa melakukan koreksi operasional.</div>
+      <div class="hint" style="margin:18px 0">Saat aktif, tombol Ubah dan Batalkan hanya muncul untuk Admin dan Owner. Anak Kandang dan Kepala Penerimaan tetap tidak bisa mengoreksi data lama.</div>
       <button class="btn ${enabled ? "btn-outline" : "btn-primary"}" id="toggle-corrections">${enabled ? "Kunci menu koreksi" : "Aktifkan menu koreksi"}</button>
     </div>`;
 }
@@ -634,7 +645,7 @@ function bindEvents() {
   document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const login=String(fd.get("login")).trim();const role=String(fd.get("role"));const defaultAssignment={Owner:"Semua akses",Admin:"Laporan","Kepala Penerimaan":"Penerimaan","Kepala Gudang":"Gudang","Anak Kandang":"Diatur dari menu Kandang"}[role]||"Belum ditentukan";const values={id:existing?.id,name:String(fd.get("name")).trim(),login,email:loginToEmail(login),role,assignment:existing?.role==="Anak Kandang"&&role==="Anak Kandang"?(existing.assignment||defaultAssignment):defaultAssignment,status:fd.get("status"),password:String(fd.get("password")).trim()};const allowedForSubmit=existing?.role==="Owner"?["Owner"]:(creatableRolesByActor[state.role]||[]);if(!allowedForSubmit.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!values.email){toast("Username / email wajib diisi");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();await loadOperationalData();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
   document.querySelectorAll("[data-edit-cage]").forEach(el=>el.onclick=()=>{state.editCageId=Number(el.dataset.editCage);render();window.scrollTo(0,0)});
   document.querySelector("#cancel-cage")?.addEventListener("click",()=>{state.editCageId=null;render()});
-  document.querySelector("#cage-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const values={name:String(fd.get("name")).trim(),status:String(fd.get("status")),keeper:String(fd.get("keeper")||""),note:String(fd.get("note")).trim()};try{await saveCageToSupabase(state.editCageId,values);await loadUsersFromSupabase();await loadOperationalData();audit(`memperbarui ${c.code}: ${values.name}`);state.editCageId=null;render();toast("Kandang dan penugasan berhasil diperbarui")}catch(error){toast(error.message||"Gagal menyimpan kandang")}});
+  document.querySelector("#cage-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const values={name:String(fd.get("name")).trim(),status:String(fd.get("status")),keeperIds:fd.getAll("keeperIds").map(String),note:String(fd.get("note")).trim()};try{await saveCageToSupabase(state.editCageId,values);await loadUsersFromSupabase();await loadOperationalData();audit(`memperbarui ${c.code}: ${values.name}`);state.editCageId=null;render();toast("Kandang dan penugasan berhasil diperbarui")}catch(error){toast(error.message||"Gagal menyimpan kandang")}});
   document.querySelector("#add-driver")?.addEventListener("click",()=>{state.editDriverId=null;state.showDriverForm=true;render();window.scrollTo(0,0)});
   document.querySelectorAll("[data-edit-driver]").forEach(el=>el.onclick=()=>{state.editDriverId=Number(el.dataset.editDriver);state.showDriverForm=false;render();window.scrollTo(0,0)});
   document.querySelector("#cancel-driver")?.addEventListener("click",()=>{state.editDriverId=null;state.showDriverForm=false;render()});
@@ -863,33 +874,41 @@ async function saveGradingToSupabase(values) {
 }
 
 async function saveCageToSupabase(cageId, values) {
-  const keeper = db.users.find(u => u.name === values.keeper && u.role === "Anak Kandang");
-  const keeperId = keeper?.id || null;
-  const oldKeeperId = cage(cageId)?.keeperId || null;
+  const oldKeeperIds = cage(cageId)?.keeperIds || [];
+  const keeperIds = values.keeperIds || [];
   const { error } = await supabase
     .from("cages")
     .update({
       name: values.name,
       status: cageStatusToDb[values.status] || "aktif",
       note: values.note,
-      keeper_id: keeperId,
+      keeper_id: keeperIds[0] || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", cageId);
   if (error) throw error;
-  await updateKeeperAssignmentSummary(keeperId);
-  if (oldKeeperId && oldKeeperId !== keeperId) await updateKeeperAssignmentSummary(oldKeeperId);
+  const { error: deleteError } = await supabase.from("cage_assignments").delete().eq("cage_id", cageId);
+  if (deleteError) throw deleteError;
+  if (keeperIds.length) {
+    const { error: insertError } = await supabase.from("cage_assignments").insert(
+      keeperIds.map(profileId => ({ cage_id: cageId, profile_id: profileId }))
+    );
+    if (insertError) throw insertError;
+  }
+  const affected = [...new Set([...oldKeeperIds, ...keeperIds])];
+  for (const profileId of affected) await updateKeeperAssignmentSummary(profileId);
 }
 
 async function updateKeeperAssignmentSummary(profileId) {
   if (!profileId) return;
   const { data, error } = await supabase
-    .from("cages")
-    .select("name")
-    .eq("keeper_id", profileId)
-    .order("id", { ascending: true });
+    .from("cage_assignments")
+    .select("cages(id, name)")
+    .eq("profile_id", profileId);
   if (error) throw error;
-  const assignment = data?.length ? data.map(c => c.name).join(", ") : "Belum ditentukan";
+  const assignment = data?.length
+    ? data.map(row => row.cages).filter(Boolean).sort((a,b) => a.id - b.id).map(c => c.name).join(", ")
+    : "Belum ditentukan";
   const { error: profileError } = await supabase.from("profiles").update({ assignment }).eq("id", profileId);
   if (profileError) throw profileError;
 }

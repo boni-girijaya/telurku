@@ -1,4 +1,4 @@
-const CACHE = "telurku-shell-v7";
+const CACHE = "telurku-shell-v9";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {

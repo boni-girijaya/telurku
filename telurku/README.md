@@ -32,7 +32,9 @@ Untuk membuka kontrol Ubah/Batalkan setoran dari menu Owner, jalankan `supabase/
 
 Untuk mengaktifkan input kg langsung dari Kepala Penerimaan, Admin, dan Owner, jalankan `supabase/migrations/2026-06-22-direct-weight-input.sql` satu kali di SQL Editor.
 
-Untuk mengizinkan satu Anak Kandang menangani beberapa kandang, jalankan `supabase/migrations/2026-06-22-multi-cage-keeper.sql` satu kali di SQL Editor.
+Untuk mengizinkan satu Anak Kandang menangani beberapa kandang dan satu kandang ditangani beberapa Anak Kandang, jalankan `supabase/migrations/2026-06-22-multi-cage-keeper.sql` satu kali di SQL Editor.
+
+Untuk membatasi koreksi setoran hanya ke Admin dan Owner, jalankan `supabase/migrations/2026-06-22-admin-owner-corrections-only.sql` satu kali di SQL Editor.
 
 ## Deployment
 
