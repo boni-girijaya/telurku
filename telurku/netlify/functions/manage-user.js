@@ -137,20 +137,7 @@ exports.handler = async event => {
       });
     }
 
-    await adminFetch(`/rest/v1/cages?keeper_id=eq.${authUserId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ keeper_id: null, updated_at: new Date().toISOString() }),
-    });
-
     if (targetRole === "kandang" && isActive && assignment.startsWith("Kandang ")) {
-      const currentCages = await adminFetch(`/rest/v1/cages?name=eq.${encodeURIComponent(assignment)}&select=id,keeper_id`);
-      const currentKeeperId = currentCages?.[0]?.keeper_id;
-      if (currentKeeperId && currentKeeperId !== authUserId) {
-        await adminFetch(`/rest/v1/profiles?id=eq.${currentKeeperId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ assignment: "Belum ditentukan" }),
-        });
-      }
       await adminFetch(`/rest/v1/cages?name=eq.${encodeURIComponent(assignment)}`, {
         method: "PATCH",
         body: JSON.stringify({ keeper_id: authUserId, updated_at: new Date().toISOString() }),

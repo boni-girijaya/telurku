@@ -32,8 +32,6 @@ create table public.cages (
   updated_at timestamptz not null default now()
 );
 
-create unique index one_cage_per_keeper on public.cages (keeper_id) where keeper_id is not null;
-
 create table public.drivers (
   id bigint generated always as identity primary key,
   name text not null,
