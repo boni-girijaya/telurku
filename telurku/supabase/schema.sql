@@ -1,6 +1,6 @@
 create extension if not exists pgcrypto;
 
-create type public.app_role as enum ('owner', 'kandang', 'penerimaan', 'gudang', 'admin');
+create type public.app_role as enum ('owner', 'kandang', 'kepala_kandang', 'penerimaan', 'gudang', 'admin');
 create type public.cage_status as enum ('aktif', 'belum_bertelur', 'afkir', 'kosong', 'perawatan');
 create type public.report_status as enum ('draft', 'waiting', 'received', 'graded', 'closed', 'cancelled');
 
@@ -133,7 +133,7 @@ as $$
       select 1
       from public.profiles target
       where target.id = target_profile_id
-        and target.role in ('kandang', 'penerimaan', 'gudang')
+        and target.role in ('kandang', 'kepala_kandang', 'penerimaan', 'gudang')
         and target.is_active = true
     )
     else false
@@ -142,8 +142,8 @@ $$;
 
 create policy "active users read profiles" on public.profiles for select to authenticated using (public.my_role() is not null);
 create policy "owner manages profiles" on public.profiles for all to authenticated using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
-create policy "admin inserts subordinate profiles" on public.profiles for insert to authenticated with check (public.my_role() = 'admin' and role in ('kandang','penerimaan','gudang'));
-create policy "admin updates subordinate profiles" on public.profiles for update to authenticated using (public.my_role() = 'admin' and role in ('kandang','penerimaan','gudang')) with check (public.my_role() = 'admin' and role in ('kandang','penerimaan','gudang'));
+create policy "admin inserts subordinate profiles" on public.profiles for insert to authenticated with check (public.my_role() = 'admin' and role in ('kandang','kepala_kandang','penerimaan','gudang'));
+create policy "admin updates subordinate profiles" on public.profiles for update to authenticated using (public.my_role() = 'admin' and role in ('kandang','kepala_kandang','penerimaan','gudang')) with check (public.my_role() = 'admin' and role in ('kandang','kepala_kandang','penerimaan','gudang'));
 create policy "owner and admin read managed passwords" on public.profile_passwords for select to authenticated using (public.can_manage_profile_password(profile_id));
 create policy "owner and admin insert managed passwords" on public.profile_passwords for insert to authenticated with check (public.can_manage_profile_password(profile_id) and updated_by = auth.uid());
 create policy "owner and admin update managed passwords" on public.profile_passwords for update to authenticated using (public.can_manage_profile_password(profile_id)) with check (public.can_manage_profile_password(profile_id) and updated_by = auth.uid());
@@ -152,13 +152,13 @@ create policy "active users read cages" on public.cages for select to authentica
 create policy "owner and admin manage cages" on public.cages for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "active users read cage assignments" on public.cage_assignments for select to authenticated using (public.my_role() is not null);
 create policy "owner and admin manage cage assignments" on public.cage_assignments for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
-create policy "operations read drivers" on public.drivers for select to authenticated using (public.my_role() in ('owner','penerimaan','admin'));
+create policy "operations read drivers" on public.drivers for select to authenticated using (public.my_role() in ('owner','kepala_kandang','penerimaan','admin'));
 create policy "owner and admin manage drivers" on public.drivers for all to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
 create policy "operations read trips" on public.pickup_trips for select to authenticated using (public.my_role() is not null);
 create policy "reception and admin manage trips" on public.pickup_trips for all to authenticated using (public.my_role() in ('owner','penerimaan','admin')) with check (public.my_role() in ('owner','penerimaan','admin'));
 
 create policy "users read allowed deposits" on public.deposits for select to authenticated using (
-  public.my_role() in ('owner','penerimaan','gudang','admin') or reporter_id = auth.uid()
+  public.my_role() in ('owner','kepala_kandang','penerimaan','gudang','admin') or reporter_id = auth.uid()
 );
 create policy "keepers create deposits" on public.deposits for insert to authenticated with check (
   public.my_role() = 'kandang' and reporter_id = auth.uid()
@@ -175,7 +175,8 @@ create policy "reception and admin create direct deposits" on public.deposits fo
 create policy "keepers edit waiting deposits" on public.deposits for update to authenticated using (
   public.my_role() = 'kandang' and reporter_id = auth.uid() and status = 'waiting'
 );
-create policy "owner and admin updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','admin'));
+create policy "owner and admin updates deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','admin')) with check (public.my_role() in ('owner','admin'));
+create policy "reception receives waiting deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','penerimaan') and status = 'waiting') with check (public.my_role() in ('owner','penerimaan') and status = 'received');
 
 create policy "active users read gradings" on public.daily_gradings for select to authenticated using (public.my_role() is not null);
 create policy "warehouse manages gradings" on public.daily_gradings for all to authenticated using (public.my_role() in ('owner','gudang')) with check (public.my_role() in ('owner','gudang'));

@@ -2,13 +2,14 @@ const roleToDb = {
   Owner: "owner",
   Admin: "admin",
   "Anak Kandang": "kandang",
+  "Kepala Kandang": "kepala_kandang",
   "Kepala Penerimaan": "penerimaan",
   "Kepala Gudang": "gudang",
 };
 
 const manageableBy = {
-  owner: ["owner", "admin", "kandang", "penerimaan", "gudang"],
-  admin: ["kandang", "penerimaan", "gudang"],
+  owner: ["owner", "admin", "kepala_kandang", "kandang", "penerimaan", "gudang"],
+  admin: ["kepala_kandang", "kandang", "penerimaan", "gudang"],
 };
 
 const json = (statusCode, body) => ({

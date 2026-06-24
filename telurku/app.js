@@ -6,6 +6,7 @@ const today = new Date().toISOString().slice(0, 10);
 const roleLabels = {
   owner: "Owner",
   kandang: "Anak Kandang",
+  kepala_kandang: "Kepala Kandang",
   penerimaan: "Kepala Penerimaan",
   gudang: "Kepala Gudang",
   admin: "Admin",
@@ -14,6 +15,7 @@ const roleLabels = {
 const navByRole = {
   owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
   kandang: [["setoran", "+", "Setor"], ["riwayat", "◷", "Riwayat"]],
+  kepala_kandang: [["laporan", "▥", "Laporan"], ["riwayat", "◷", "Riwayat"]],
   penerimaan: [["antrian", "✓", "Penerimaan"], ["direct", "＋", "Input Kg"], ["riwayat", "◷", "Riwayat"]],
   gudang: [["grading", "◫", "Grading"], ["riwayat", "◷", "Riwayat"]],
   admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
@@ -22,25 +24,27 @@ const navByRole = {
 const roleUsers = {
   owner: { name: "Bapak Antoni", initials: "BA" },
   kandang: { name: "Andi Pratama", initials: "AP" },
+  kepala_kandang: { name: "Koordinator Kandang", initials: "KK" },
   penerimaan: { name: "Rudi Hartono", initials: "RH" },
   gudang: { name: "Siti Aminah", initials: "SA" },
   admin: { name: "Maya Putri", initials: "MP" },
 };
 
 const subordinateRolesByActor = {
-  owner: ["Owner", "Admin", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
-  admin: ["Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+  owner: ["Owner", "Admin", "Kepala Kandang", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+  admin: ["Kepala Kandang", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
 };
 
 const creatableRolesByActor = {
-  owner: ["Admin", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
-  admin: ["Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+  owner: ["Admin", "Kepala Kandang", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
+  admin: ["Kepala Kandang", "Anak Kandang", "Kepala Penerimaan", "Kepala Gudang"],
 };
 
 const dbRoleToLabel = {
   owner: "Owner",
   admin: "Admin",
   kandang: "Anak Kandang",
+  kepala_kandang: "Kepala Kandang",
   penerimaan: "Kepala Penerimaan",
   gudang: "Kepala Gudang",
 };
@@ -106,7 +110,7 @@ function seedData() {
 }
 
 let db = loadData();
-let state = { role: "owner", page: "dashboard", selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
+let state = { role: "owner", page: "dashboard", reportDate: today, loadedDate: today, selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
 let authState = { loading: true, session: null, profile: null, error: "" };
 window.telurkuSupabase = supabase;
 
@@ -124,6 +128,11 @@ function defaultPasswordFor(user) {
 }
 function fmt(n, digits = 0) { return new Intl.NumberFormat("id-ID", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number(n || 0)); }
 function dateLong(value = today) { return new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${value}T12:00:00`)); }
+function shiftDate(value, days) {
+  const date = new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 function cage(id) { return db.cages.find(c => c.id === Number(id)); }
 function initials(name = "") { return name.split(" ").filter(Boolean).map(x => x[0]).slice(0, 2).join("").toUpperCase() || "TK"; }
 function timeShort(value) { return value ? new Date(value).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : ""; }
@@ -177,6 +186,7 @@ function passwordCell(user) {
 
 function assignmentOptionsForRole(role) {
   if (role === "Anak Kandang") return ["Diatur dari menu Kandang"];
+  if (role === "Kepala Kandang") return ["Semua laporan kandang"];
   if (role === "Kepala Penerimaan") return ["Penerimaan"];
   if (role === "Kepala Gudang") return ["Gudang"];
   if (role === "Admin") return ["Laporan"];
@@ -224,7 +234,7 @@ function refreshUserAssignmentsFromCages() {
   });
 }
 
-async function loadOperationalData() {
+async function loadOperationalData(targetDate = state.page === "laporan" ? state.reportDate : today) {
   const [{ data: profiles }, { data: cages, error: cageError }, { data: assignments, error: assignmentError }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, role, assignment, is_active"),
     supabase.from("cages").select("id, code, name, status, note, keeper_id").order("id", { ascending: true }),
@@ -256,10 +266,10 @@ async function loadOperationalData() {
   refreshUserAssignmentsFromCages();
 
   const [{ data: deposits, error: depositError }, { data: trips }, { data: drivers }, { data: gradings }, { data: settings }] = await Promise.all([
-    supabase.from("deposits").select("id, reference_no, report_date, reported_at, cage_id, trip_no, trip_id, reported_pieces, actual_pieces, net_weight_kg, reporter_id, status, note").eq("report_date", today).order("reported_at", { ascending: false }),
-    supabase.from("pickup_trips").select("id, trip_date, trip_no, driver_id, receiver_id").eq("trip_date", today),
+    supabase.from("deposits").select("id, reference_no, report_date, reported_at, cage_id, trip_no, trip_id, reported_pieces, actual_pieces, net_weight_kg, reporter_id, status, note").eq("report_date", targetDate).order("reported_at", { ascending: false }),
+    supabase.from("pickup_trips").select("id, trip_date, trip_no, driver_id, receiver_id").eq("trip_date", targetDate),
     supabase.from("drivers").select("id, name, is_active").order("name", { ascending: true }),
-    supabase.from("daily_gradings").select("*").eq("grading_date", today).limit(1),
+    supabase.from("daily_gradings").select("*").eq("grading_date", targetDate).limit(1),
     supabase.from("app_settings").select("key, value").in("key", ["corrections_enabled"]),
   ]);
   if (depositError) throw depositError;
@@ -308,6 +318,7 @@ async function loadOperationalData() {
   }
   const correctionSetting = (settings || []).find(item => item.key === "corrections_enabled");
   db.settings = { ...(db.settings || {}), correctionsEnabled: correctionSetting?.value?.enabled === true };
+  state.loadedDate = targetDate;
   saveData();
 }
 
@@ -488,7 +499,19 @@ function laporanPage() {
   const receivedPieces = sum(received,"actual");
   const gradeLabels = { A: "Bagus", B: "Putih", C: "Retak", D: "Hancur", E: "Afkir" };
   const gradeTotal = ["A","B","C","D","E"].reduce((a,g)=>a+Number(db.grading[g]||0),0);
-  return `<div class="section-head"><div><h2>Laporan ${dateLong()}</h2><p>Rekap produksi, penerimaan, dan pertanggungjawaban petugas</p></div><button class="btn btn-outline" id="export-csv">⇩ Unduh CSV</button></div>
+  const isToday = state.reportDate === today;
+  return `<div class="report-toolbar">
+      <div><h2>Laporan ${dateLong(state.reportDate)}</h2><p>Rekap produksi, penerimaan, dan pertanggungjawaban petugas</p></div>
+      <div class="report-actions">
+        <div class="date-controls">
+          <button class="btn btn-outline date-step" type="button" data-report-day="-1" title="Tanggal sebelumnya" aria-label="Tanggal sebelumnya">‹</button>
+          <input id="report-date" type="date" value="${state.reportDate}" max="${today}" aria-label="Pilih tanggal laporan" />
+          <button class="btn btn-outline date-step" type="button" data-report-day="1" title="Tanggal berikutnya" aria-label="Tanggal berikutnya" ${isToday ? "disabled" : ""}>›</button>
+          ${isToday ? "" : `<button class="btn btn-light" type="button" id="report-today">Hari ini</button>`}
+        </div>
+        <button class="btn btn-outline" id="export-csv">⇩ Unduh CSV</button>
+      </div>
+    </div>
     <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(receivedPieces)} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmt(weight,1)} kg`, receivedPieces ? `Rata-rata ${fmt(weight*1000/receivedPieces,1)} g/butir` : "Belum ada penerimaan", "▣")}${stat("Total grading", `${fmt(gradeTotal,1)} kg`, `Selisih ${fmt(weight-gradeTotal,1)} kg`, "◫")}</div>
     <div class="section-head"><div><h2>Berat per grade</h2><p>Rekap kilogram hasil grading A sampai E</p></div></div>
     <div class="card card-pad"><div class="grade-grid report-grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div></div>
@@ -599,7 +622,7 @@ function bindAuthEvents() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=()=>{state.page=el.dataset.nav;state.selectedReport=null;state.selectedTrip=null;render();window.scrollTo(0,0)});
+  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=async()=>{state.page=el.dataset.nav;state.selectedReport=null;state.selectedTrip=null;state.editReportId=null;try{const targetDate=state.page==="laporan"?state.reportDate:today;if(state.loadedDate!==targetDate)await loadOperationalData(targetDate);render();window.scrollTo(0,0)}catch(error){toast(error.message||"Gagal memuat data")}});
   document.querySelector("#logout-btn")?.addEventListener("click", async()=>{await supabase.auth.signOut();authState={ loading:false, session:null, profile:null, error:"" };render()});
   document.querySelector("#setoran-form")?.addEventListener("submit", async e=>{
     e.preventDefault(); const fd=new FormData(e.currentTarget);
@@ -635,6 +658,24 @@ function bindEvents() {
   gradingForm?.addEventListener("input",()=>{const fd=new FormData(gradingForm);const total=["A","B","C","D","E"].reduce((a,g)=>a+Number(fd.get(g)||0),0);const incoming=sum(db.reports.filter(r=>r.status==="received"),"weight");document.querySelector("#grade-total").textContent=`${fmt(total,1)} kg`;document.querySelector("#grade-diff").textContent=`${fmt(incoming-total,1)} kg`;document.querySelector("#grade-e").textContent=`${fmt(fd.get("E"),1)} kg`});
   gradingForm?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={A:Number(fd.get("A")||0),B:Number(fd.get("B")||0),C:Number(fd.get("C")||0),D:Number(fd.get("D")||0),E:Number(fd.get("E")||0),note:String(fd.get("note")||""),closed:e.submitter?.value==="close"};try{await saveGradingToSupabase(values);await loadOperationalData();audit(values.closed?"menutup laporan grading harian":"menyimpan grading sementara");render();toast(values.closed?"Laporan harian berhasil ditutup":"Grading sementara tersimpan")}catch(error){toast(error.message||"Gagal menyimpan grading")}});
   document.querySelector("#export-csv")?.addEventListener("click",exportCsv);
+  const openReportDate = async value => {
+    const nextDate = String(value || "");
+    if (!nextDate || nextDate > today) {
+      toast("Tanggal laporan tidak boleh melewati hari ini");
+      return;
+    }
+    try {
+      state.reportDate = nextDate;
+      state.editReportId = null;
+      await loadOperationalData(nextDate);
+      render();
+    } catch (error) {
+      toast(error.message || "Gagal memuat laporan tanggal tersebut");
+    }
+  };
+  document.querySelector("#report-date")?.addEventListener("change", e => openReportDate(e.currentTarget.value));
+  document.querySelectorAll("[data-report-day]").forEach(el => el.addEventListener("click", () => openReportDate(shiftDate(state.reportDate, Number(el.dataset.reportDay)))));
+  document.querySelector("#report-today")?.addEventListener("click", () => openReportDate(today));
   document.querySelectorAll("[data-toggle-user]").forEach(el=>el.onclick=async()=>{const u=db.users.find(x=>x.id===el.dataset.toggleUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}const nextStatus=u.status==="Aktif"?"Nonaktif":"Aktif";try{await saveUserToSupabase({...u,status:nextStatus,password:""});await loadUsersFromSupabase();audit(`${nextStatus==="Aktif"?"mengaktifkan":"menonaktifkan"} pengguna ${u.name}`);render();toast("Status pengguna diperbarui")}catch(error){toast(error.message||"Gagal memperbarui status pengguna")}});
   document.querySelector("#add-user")?.addEventListener("click",()=>{state.editUserId=null;state.showUserForm=true;render();window.scrollTo(0,0)});
   document.querySelectorAll("[data-edit-user]").forEach(el=>el.onclick=()=>{const u=db.users.find(x=>x.id===el.dataset.editUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}state.editUserId=u.id;state.showUserForm=false;render();window.scrollTo(0,0)});
@@ -642,7 +683,7 @@ function bindEvents() {
   const userRoleSelect=document.querySelector("#user-form select[name='role']");
   userRoleSelect?.addEventListener("change",()=>updateUserAssignmentOptions());
   updateUserAssignmentOptions();
-  document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const login=String(fd.get("login")).trim();const role=String(fd.get("role"));const defaultAssignment={Owner:"Semua akses",Admin:"Laporan","Kepala Penerimaan":"Penerimaan","Kepala Gudang":"Gudang","Anak Kandang":"Diatur dari menu Kandang"}[role]||"Belum ditentukan";const values={id:existing?.id,name:String(fd.get("name")).trim(),login,email:loginToEmail(login),role,assignment:existing?.role==="Anak Kandang"&&role==="Anak Kandang"?(existing.assignment||defaultAssignment):defaultAssignment,status:fd.get("status"),password:String(fd.get("password")).trim()};const allowedForSubmit=existing?.role==="Owner"?["Owner"]:(creatableRolesByActor[state.role]||[]);if(!allowedForSubmit.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!values.email){toast("Username / email wajib diisi");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();await loadOperationalData();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
+  document.querySelector("#user-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const existing=db.users.find(u=>u.id===state.editUserId);if(existing&&!canManageUser(existing)){toast("Akses pengguna ini dilindungi");return;}const login=String(fd.get("login")).trim();const role=String(fd.get("role"));const defaultAssignment={Owner:"Semua akses",Admin:"Laporan","Kepala Kandang":"Semua laporan kandang","Kepala Penerimaan":"Penerimaan","Kepala Gudang":"Gudang","Anak Kandang":"Diatur dari menu Kandang"}[role]||"Belum ditentukan";const values={id:existing?.id,name:String(fd.get("name")).trim(),login,email:loginToEmail(login),role,assignment:existing?.role==="Anak Kandang"&&role==="Anak Kandang"?(existing.assignment||defaultAssignment):defaultAssignment,status:fd.get("status"),password:String(fd.get("password")).trim()};const allowedForSubmit=existing?.role==="Owner"?["Owner"]:(creatableRolesByActor[state.role]||[]);if(!allowedForSubmit.includes(values.role)){toast("Posisi ini tidak bisa dikelola oleh akun saat ini");return;}if(!values.email){toast("Username / email wajib diisi");return;}if(!existing&&!values.password){toast("Password wajib diisi");return;}if(values.password&&values.password.length<6){toast("Password minimal 6 karakter");return;}try{await saveUserToSupabase(values);await loadUsersFromSupabase();await loadOperationalData();audit(`${existing?"memperbarui":"menambahkan"} pengguna ${values.name}`);state.editUserId=null;state.showUserForm=false;render();toast("Data pengguna tersimpan di Supabase")}catch(error){toast(error.message||"Gagal menyimpan pengguna")}});
   document.querySelectorAll("[data-edit-cage]").forEach(el=>el.onclick=()=>{state.editCageId=Number(el.dataset.editCage);render();window.scrollTo(0,0)});
   document.querySelector("#cancel-cage")?.addEventListener("click",()=>{state.editCageId=null;render()});
   document.querySelector("#cage-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const c=cage(state.editCageId);const values={name:String(fd.get("name")).trim(),status:String(fd.get("status")),keeperIds:fd.getAll("keeperIds").map(String),note:String(fd.get("note")).trim()};try{await saveCageToSupabase(state.editCageId,values);await loadUsersFromSupabase();await loadOperationalData();audit(`memperbarui ${c.code}: ${values.name}`);state.editCageId=null;render();toast("Kandang dan penugasan berhasil diperbarui")}catch(error){toast(error.message||"Gagal menyimpan kandang")}});
@@ -937,7 +978,8 @@ function exportCsv() {
   const header=["Tanggal","ID","Kandang","Trip","Pelapor","Butir Dilaporkan","Butir Diterima","Selisih","Berat Kg","Supir","Penerima","Status"];
   const lines=db.reports.map(r=>[r.date,r.id,cage(r.cageId).name,r.trip,r.reporter,r.reported,r.actual??"",r.actual==null?"":r.actual-r.reported,r.weight??"",r.driver??"",r.receiver??"",r.status]);
   const csv=[header,...lines].map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
-  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download=`laporan-telur-${today}.csv`;a.click();URL.revokeObjectURL(a.href);toast("Laporan CSV dibuat");
+  const reportDate=state.page==="laporan"?state.reportDate:today;
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download=`laporan-telur-${reportDate}.csv`;a.click();URL.revokeObjectURL(a.href);toast("Laporan CSV dibuat");
 }
 
 async function loadAuthProfile() {

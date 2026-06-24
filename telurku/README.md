@@ -20,7 +20,7 @@ Data operasional baru disimpan ke tabel Supabase: kandang, setoran, penerimaan t
 
 Sistem digunakan untuk pencatatan baru. Tidak ada proses migrasi atau impor data lama.
 
-Owner dapat melihat dan mengatur password semua pengguna. Admin hanya dapat melihat dan mengatur password Anak Kandang, Kepala Penerimaan, dan Kepala Gudang; password Owner dan Admin lain tetap dilindungi.
+Owner dapat melihat dan mengatur password semua pengguna. Admin hanya dapat melihat dan mengatur password Kepala Kandang, Anak Kandang, Kepala Penerimaan, dan Kepala Gudang; password Owner dan Admin lain tetap dilindungi.
 
 Untuk project Supabase yang sudah dibuat sebelum kolom email dan penugasan ditambahkan, jalankan file `supabase/migrations/2026-06-21-profile-email-assignment.sql` di SQL Editor.
 
@@ -35,6 +35,8 @@ Untuk mengaktifkan input kg langsung dari Kepala Penerimaan, Admin, dan Owner, j
 Untuk mengizinkan satu Anak Kandang menangani beberapa kandang dan satu kandang ditangani beberapa Anak Kandang, jalankan `supabase/migrations/2026-06-22-multi-cage-keeper.sql` satu kali di SQL Editor.
 
 Untuk membatasi koreksi setoran hanya ke Admin dan Owner, jalankan `supabase/migrations/2026-06-22-admin-owner-corrections-only.sql` satu kali di SQL Editor.
+
+Untuk menambahkan posisi Kepala Kandang yang bisa melihat seluruh laporan Anak Kandang, jalankan `supabase/migrations/2026-06-23-head-cage-role.sql` satu kali di SQL Editor.
 
 ## Deployment
 
