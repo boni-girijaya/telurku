@@ -179,7 +179,7 @@ create policy "owner and admin updates deposits" on public.deposits for update t
 create policy "reception receives waiting deposits" on public.deposits for update to authenticated using (public.my_role() in ('owner','penerimaan') and status = 'waiting') with check (public.my_role() in ('owner','penerimaan') and status = 'received');
 
 create policy "active users read gradings" on public.daily_gradings for select to authenticated using (public.my_role() is not null);
-create policy "warehouse manages gradings" on public.daily_gradings for all to authenticated using (public.my_role() in ('owner','gudang')) with check (public.my_role() in ('owner','gudang'));
+create policy "warehouse manages gradings" on public.daily_gradings for all to authenticated using (public.my_role() in ('owner','admin','gudang')) with check (public.my_role() in ('owner','admin','gudang'));
 create policy "active users read app settings" on public.app_settings for select to authenticated using (public.my_role() is not null);
 create policy "owner manages app settings" on public.app_settings for all to authenticated using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
 create policy "owner reads audit" on public.audit_logs for select to authenticated using (public.my_role() = 'owner');

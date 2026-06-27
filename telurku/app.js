@@ -13,12 +13,12 @@ const roleLabels = {
 };
 
 const navByRole = {
-  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
+  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
   kandang: [["setoran", "+", "Setor"], ["riwayat", "◷", "Riwayat"]],
   kepala_kandang: [["laporan", "▥", "Laporan"], ["riwayat", "◷", "Riwayat"]],
   penerimaan: [["antrian", "✓", "Penerimaan"], ["direct", "＋", "Input Kg"], ["riwayat", "◷", "Riwayat"]],
   gudang: [["grading", "◫", "Grading"], ["riwayat", "◷", "Riwayat"]],
-  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
+  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
 };
 
 const roleUsers = {
@@ -110,7 +110,7 @@ function seedData() {
 }
 
 let db = loadData();
-let state = { role: "owner", page: "dashboard", reportDate: today, loadedDate: today, selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
+let state = { role: "owner", page: "dashboard", reportDate: today, gradingDate: today, loadedDate: today, selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
 let authState = { loading: true, session: null, profile: null, error: "" };
 window.telurkuSupabase = supabase;
 
@@ -234,7 +234,13 @@ function refreshUserAssignmentsFromCages() {
   });
 }
 
-async function loadOperationalData(targetDate = state.page === "laporan" ? state.reportDate : today) {
+function activeDataDate() {
+  if (state.page === "laporan") return state.reportDate;
+  if (state.page === "grading") return state.gradingDate;
+  return today;
+}
+
+async function loadOperationalData(targetDate = activeDataDate()) {
   const [{ data: profiles }, { data: cages, error: cageError }, { data: assignments, error: assignmentError }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, role, assignment, is_active"),
     supabase.from("cages").select("id, code, name, status, note, keeper_id").order("id", { ascending: true }),
@@ -484,11 +490,21 @@ function gradingPage() {
   const inWeight = sum(received,"weight");
   const total = ["A","B","C","D","E"].reduce((a,g)=>a+Number(db.grading[g]||0),0);
   const labels = {A:"Bagus",B:"Putih",C:"Retak",D:"Hancur",E:"Afkir"};
-  return `<section class="hero"><h2>Grading gabungan hari ini</h2><p>Semua telur telah digabung setelah penimbangan per kandang. Catat hasil akhir dalam kilogram.</p><span class="date-pill">${received.length} setoran · ${fmt(inWeight,1)} kg masuk</span></section>
+  const isToday = state.gradingDate === today;
+  return `<div class="report-toolbar">
+      <div><h2>Pekerjaan ${dateLong(state.gradingDate)}</h2><p>Pilih tanggal yang belum diselesaikan oleh Kepala Gudang</p></div>
+      <div class="date-controls">
+        <button class="btn btn-outline date-step" type="button" data-grading-day="-1" title="Tanggal sebelumnya" aria-label="Tanggal sebelumnya">‹</button>
+        <input id="grading-date" type="date" value="${state.gradingDate}" max="${today}" aria-label="Pilih tanggal grading" />
+        <button class="btn btn-outline date-step" type="button" data-grading-day="1" title="Tanggal berikutnya" aria-label="Tanggal berikutnya" ${isToday ? "disabled" : ""}>›</button>
+        ${isToday ? "" : `<button class="btn btn-light" type="button" id="grading-today">Hari ini</button>`}
+      </div>
+    </div>
+    <section class="hero"><h2>Grading gabungan ${isToday ? "hari ini" : "tanggal terpilih"}</h2><p>Semua telur yang diterima pada tanggal ini digabung setelah penimbangan per kandang.</p><span class="date-pill">${received.length} setoran · ${fmt(inWeight,1)} kg masuk · ${db.grading.closed ? "Sudah selesai" : "Belum ditutup"}</span></section>
     <div class="card card-pad"><form id="grading-form"><div class="grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${labels[g]}</small><input name="${g}" type="number" min="0" step="0.1" value="${db.grading[g]}" aria-label="Grade ${g}"/></div>`).join("")}</div>
       <div class="reconcile"><div><small>Berat masuk</small><strong>${fmt(inWeight,1)} kg</strong></div><div><small>Total grading</small><strong id="grade-total">${fmt(total,1)} kg</strong></div><div><small>Selisih</small><strong id="grade-diff">${fmt(inWeight-total,1)} kg</strong></div><div><small>Afkir (E)</small><strong id="grade-e">${fmt(db.grading.E,1)} kg</strong></div></div>
       <div class="form-group" style="margin-top:18px"><label>Catatan gudang</label><textarea name="note" placeholder="Catatan penyebab selisih atau afkir">${escapeHtml(db.grading.note)}</textarea></div>
-      <div class="form-row"><button type="submit" name="action" value="save" class="btn btn-light">Simpan sementara</button><button type="submit" name="action" value="close" class="btn btn-primary">Tutup laporan hari ini</button></div>
+      <div class="form-row"><button type="submit" name="action" value="save" class="btn btn-light">Simpan sementara</button><button type="submit" name="action" value="close" class="btn btn-primary">${db.grading.closed ? "Simpan pembaruan" : "Selesaikan pekerjaan"}</button></div>
     </form></div>`;
 }
 
@@ -500,6 +516,7 @@ function laporanPage() {
   const gradeLabels = { A: "Bagus", B: "Putih", C: "Retak", D: "Hancur", E: "Afkir" };
   const gradeTotal = ["A","B","C","D","E"].reduce((a,g)=>a+Number(db.grading[g]||0),0);
   const isToday = state.reportDate === today;
+  const canEditGrading = ["owner", "admin"].includes(state.role);
   return `<div class="report-toolbar">
       <div><h2>Laporan ${dateLong(state.reportDate)}</h2><p>Rekap produksi, penerimaan, dan pertanggungjawaban petugas</p></div>
       <div class="report-actions">
@@ -513,7 +530,7 @@ function laporanPage() {
       </div>
     </div>
     <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(receivedPieces)} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmt(weight,1)} kg`, receivedPieces ? `Rata-rata ${fmt(weight*1000/receivedPieces,1)} g/butir` : "Belum ada penerimaan", "▣")}${stat("Total grading", `${fmt(gradeTotal,1)} kg`, `Selisih ${fmt(weight-gradeTotal,1)} kg`, "◫")}</div>
-    <div class="section-head"><div><h2>Berat per grade</h2><p>Rekap kilogram hasil grading A sampai E</p></div></div>
+    <div class="section-head"><div><h2>Berat per grade</h2><p>Rekap kilogram hasil grading A sampai E</p></div>${canEditGrading ? `<button class="btn btn-outline" id="edit-grading-from-report">Ubah grading</button>` : ""}</div>
     <div class="card card-pad"><div class="grade-grid report-grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div></div>
     ${recentTable(db.reports)}
     <div class="section-head"><div><h2>Kontrol per supir</h2><p>Jumlah trip dan selisih butir</p></div></div>
@@ -622,7 +639,7 @@ function bindAuthEvents() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=async()=>{state.page=el.dataset.nav;state.selectedReport=null;state.selectedTrip=null;state.editReportId=null;try{const targetDate=state.page==="laporan"?state.reportDate:today;if(state.loadedDate!==targetDate)await loadOperationalData(targetDate);render();window.scrollTo(0,0)}catch(error){toast(error.message||"Gagal memuat data")}});
+  document.querySelectorAll("[data-nav]").forEach(el=>el.onclick=async()=>{state.page=el.dataset.nav;state.selectedReport=null;state.selectedTrip=null;state.editReportId=null;try{const targetDate=activeDataDate();if(state.loadedDate!==targetDate)await loadOperationalData(targetDate);render();window.scrollTo(0,0)}catch(error){toast(error.message||"Gagal memuat data")}});
   document.querySelector("#logout-btn")?.addEventListener("click", async()=>{await supabase.auth.signOut();authState={ loading:false, session:null, profile:null, error:"" };render()});
   document.querySelector("#setoran-form")?.addEventListener("submit", async e=>{
     e.preventDefault(); const fd=new FormData(e.currentTarget);
@@ -656,7 +673,24 @@ function bindEvents() {
   });
   const gradingForm=document.querySelector("#grading-form");
   gradingForm?.addEventListener("input",()=>{const fd=new FormData(gradingForm);const total=["A","B","C","D","E"].reduce((a,g)=>a+Number(fd.get(g)||0),0);const incoming=sum(db.reports.filter(r=>r.status==="received"),"weight");document.querySelector("#grade-total").textContent=`${fmt(total,1)} kg`;document.querySelector("#grade-diff").textContent=`${fmt(incoming-total,1)} kg`;document.querySelector("#grade-e").textContent=`${fmt(fd.get("E"),1)} kg`});
-  gradingForm?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={A:Number(fd.get("A")||0),B:Number(fd.get("B")||0),C:Number(fd.get("C")||0),D:Number(fd.get("D")||0),E:Number(fd.get("E")||0),note:String(fd.get("note")||""),closed:e.submitter?.value==="close"};try{await saveGradingToSupabase(values);await loadOperationalData();audit(values.closed?"menutup laporan grading harian":"menyimpan grading sementara");render();toast(values.closed?"Laporan harian berhasil ditutup":"Grading sementara tersimpan")}catch(error){toast(error.message||"Gagal menyimpan grading")}});
+  gradingForm?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={A:Number(fd.get("A")||0),B:Number(fd.get("B")||0),C:Number(fd.get("C")||0),D:Number(fd.get("D")||0),E:Number(fd.get("E")||0),note:String(fd.get("note")||""),closed:db.grading.closed||e.submitter?.value==="close"};try{await saveGradingToSupabase(values,state.gradingDate);await loadOperationalData(state.gradingDate);audit(`${values.closed?"menyelesaikan":"menyimpan"} grading ${state.gradingDate}`);render();toast(values.closed?"Pekerjaan tanggal tersebut berhasil diselesaikan":"Grading sementara tersimpan")}catch(error){toast(error.message||"Gagal menyimpan grading")}});
+  const openGradingDate = async value => {
+    const nextDate = String(value || "");
+    if (!nextDate || nextDate > today) {
+      toast("Tanggal pekerjaan tidak boleh melewati hari ini");
+      return;
+    }
+    try {
+      state.gradingDate = nextDate;
+      await loadOperationalData(nextDate);
+      render();
+    } catch (error) {
+      toast(error.message || "Gagal memuat pekerjaan tanggal tersebut");
+    }
+  };
+  document.querySelector("#grading-date")?.addEventListener("change", e => openGradingDate(e.currentTarget.value));
+  document.querySelectorAll("[data-grading-day]").forEach(el => el.addEventListener("click", () => openGradingDate(shiftDate(state.gradingDate, Number(el.dataset.gradingDay)))));
+  document.querySelector("#grading-today")?.addEventListener("click", () => openGradingDate(today));
   document.querySelector("#export-csv")?.addEventListener("click",exportCsv);
   const openReportDate = async value => {
     const nextDate = String(value || "");
@@ -676,6 +710,7 @@ function bindEvents() {
   document.querySelector("#report-date")?.addEventListener("change", e => openReportDate(e.currentTarget.value));
   document.querySelectorAll("[data-report-day]").forEach(el => el.addEventListener("click", () => openReportDate(shiftDate(state.reportDate, Number(el.dataset.reportDay)))));
   document.querySelector("#report-today")?.addEventListener("click", () => openReportDate(today));
+  document.querySelector("#edit-grading-from-report")?.addEventListener("click",async()=>{if(!["owner","admin"].includes(state.role)){toast("Hanya Owner dan Admin yang bisa mengubah grading dari laporan");return;}try{state.page="grading";state.gradingDate=state.reportDate;await loadOperationalData(state.gradingDate);render();window.scrollTo(0,0)}catch(error){toast(error.message||"Gagal membuka grading tanggal laporan")}});
   document.querySelectorAll("[data-toggle-user]").forEach(el=>el.onclick=async()=>{const u=db.users.find(x=>x.id===el.dataset.toggleUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}const nextStatus=u.status==="Aktif"?"Nonaktif":"Aktif";try{await saveUserToSupabase({...u,status:nextStatus,password:""});await loadUsersFromSupabase();audit(`${nextStatus==="Aktif"?"mengaktifkan":"menonaktifkan"} pengguna ${u.name}`);render();toast("Status pengguna diperbarui")}catch(error){toast(error.message||"Gagal memperbarui status pengguna")}});
   document.querySelector("#add-user")?.addEventListener("click",()=>{state.editUserId=null;state.showUserForm=true;render();window.scrollTo(0,0)});
   document.querySelectorAll("[data-edit-user]").forEach(el=>el.onclick=()=>{const u=db.users.find(x=>x.id===el.dataset.editUser);if(!canManageUser(u)){toast("Akses pengguna ini dilindungi");return;}state.editUserId=u.id;state.showUserForm=false;render();window.scrollTo(0,0)});
@@ -894,12 +929,12 @@ async function receiveTripToSupabase(tripNo, driverName, rows, fd) {
   }
 }
 
-async function saveGradingToSupabase(values) {
+async function saveGradingToSupabase(values, gradingDate = today) {
   const { data } = await supabase.auth.getSession();
   const userId = data.session?.user?.id;
   if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
   const { error } = await supabase.from("daily_gradings").upsert({
-    grading_date: today,
+    grading_date: gradingDate,
     grade_a_kg: values.A,
     grade_b_kg: values.B,
     grade_c_kg: values.C,
