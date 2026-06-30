@@ -1,0 +1,9 @@
+{
+  "name": "Telurku Operasional",
+  "short_name": "Telurku",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f5f1",
+  "theme_color": "#174f3a",
+  "icons": []
+}

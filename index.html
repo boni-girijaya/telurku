@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#174f3a" />
+  <meta name="description" content="Sistem operasional penerimaan dan grading telur" />
+  <title>Telurku Operasional</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script>
+    window.addEventListener("error", function (event) {
+      var app = document.getElementById("app");
+      if (!app || app.innerHTML.trim()) return;
+      app.innerHTML = '<main class="auth-screen"><section class="auth-card"><h1>Aplikasi belum bisa dibuka</h1><p>Terjadi error saat memuat aplikasi. Coba refresh. Jika masih muncul, kirim pesan error ini ke developer.</p><div class="alert">' + String(event.message || "Error tidak dikenal").replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]; }) + '</div></section></main>';
+    });
+    window.addEventListener("unhandledrejection", function (event) {
+      var app = document.getElementById("app");
+      if (!app || app.innerHTML.trim()) return;
+      var reason = event.reason && (event.reason.message || event.reason.error_description || event.reason.error) || event.reason || "Error tidak dikenal";
+      app.innerHTML = '<main class="auth-screen"><section class="auth-card"><h1>Aplikasi belum bisa dibuka</h1><p>Terjadi error saat menyiapkan sesi Supabase. Coba refresh. Jika masih muncul, kirim pesan error ini ke developer.</p><div class="alert">' + String(reason).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]; }) + '</div></section></main>';
+    });
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
