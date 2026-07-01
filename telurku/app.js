@@ -13,12 +13,12 @@ const roleLabels = {
 };
 
 const navByRole = {
-  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
+  owner: [["dashboard", "⌂", "Ringkasan"], ["laporan", "▥", "Laporan"], ["antrian", "✓", "Penerimaan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"], ["settings", "⚙", "Kontrol"]],
   kandang: [["setoran", "+", "Setor"], ["riwayat", "◷", "Riwayat"]],
   kepala_kandang: [["laporan", "▥", "Laporan"], ["riwayat", "◷", "Riwayat"]],
   penerimaan: [["antrian", "✓", "Penerimaan"], ["direct", "＋", "Input Kg"], ["riwayat", "◷", "Riwayat"]],
   gudang: [["grading", "◫", "Grading"], ["riwayat", "◷", "Riwayat"]],
-  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
+  admin: [["dashboard", "⌂", "Dashboard"], ["laporan", "▥", "Laporan"], ["antrian", "✓", "Penerimaan"], ["grading", "◫", "Ubah Grading"], ["direct", "＋", "Input Kg"], ["kandang", "▦", "Kandang"], ["drivers", "◇", "Supir"], ["users", "♙", "Pengguna"]],
 };
 
 const roleUsers = {
@@ -110,7 +110,7 @@ function seedData() {
 }
 
 let db = loadData();
-let state = { role: "owner", page: "dashboard", reportDate: today, gradingDate: today, loadedDate: today, selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
+let state = { role: "owner", page: "dashboard", reportDate: today, gradingDate: today, directDate: today, queueDate: today, driverDate: today, loadedDate: today, selectedReport: null, selectedTrip: null, editReportId: null, editCageId: null, editUserId: null, editDriverId: null, showUserForm: false, showDriverForm: false };
 let authState = { loading: true, session: null, profile: null, error: "" };
 window.telurkuSupabase = supabase;
 
@@ -127,6 +127,16 @@ function defaultPasswordFor(user) {
   return `${String(user.role || "User").split(" ")[0]}${String(user.id || "01").padStart(2, "0")}`;
 }
 function fmt(n, digits = 0) { return new Intl.NumberFormat("id-ID", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number(n || 0)); }
+function fmtKg(n) { return fmt(n, 2); }
+function dateControls(id, value) {
+  const isToday = value === today;
+  return `<div class="date-controls">
+    <button class="btn btn-outline date-step" type="button" data-${id}-day="-1" title="Tanggal sebelumnya" aria-label="Tanggal sebelumnya">‹</button>
+    <input id="${id}-date" type="date" value="${value}" max="${today}" aria-label="Pilih tanggal" />
+    <button class="btn btn-outline date-step" type="button" data-${id}-day="1" title="Tanggal berikutnya" aria-label="Tanggal berikutnya" ${isToday ? "disabled" : ""}>›</button>
+    ${isToday ? "" : `<button class="btn btn-light" type="button" id="${id}-today">Hari ini</button>`}
+  </div>`;
+}
 function dateLong(value = today) { return new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${value}T12:00:00`)); }
 function shiftDate(value, days) {
   const date = new Date(`${value}T12:00:00`);
@@ -237,6 +247,9 @@ function refreshUserAssignmentsFromCages() {
 function activeDataDate() {
   if (state.page === "laporan") return state.reportDate;
   if (state.page === "grading") return state.gradingDate;
+  if (state.page === "direct") return state.directDate;
+  if (state.page === "antrian") return state.queueDate;
+  if (state.page === "drivers") return state.driverDate;
   return today;
 }
 
@@ -383,17 +396,17 @@ function dashboardPage() {
   const gradeLabels = { A: "Bagus", B: "Putih", C: "Retak", D: "Hancur", E: "Afkir" };
   return `<section class="hero"><h2>${greeting}</h2><p>${state.role === "admin" ? "Berat per grade hari ini siap digunakan sebagai acuan pencatatan ke Accurate." : `Produksi hari ini berjalan normal. Ada ${db.reports.filter(r => r.status === "waiting").length} setoran yang masih menunggu penerimaan.`}</p><span class="date-pill">● Data diperbarui saat ini</span></section>
     <div class="grid cols-4">
-      ${stat("Total diterima", `${fmt(weight,1)} kg`, `${fmt(actual)} butir`, "◉")}
+      ${stat("Total diterima", `${fmtKg(weight)} kg`, `${fmt(actual)} butir`, "◉")}
       ${stat("Kandang aktif", `${active} / ${db.cages.length}`, `${db.cages.length-active} tidak aktif`, "▦")}
       ${stat("Setoran hari ini", `${db.reports.length} trip`, `${received.length} sudah ditimbang`, "↗")}
       ${stat("Perlu diperiksa", `${mismatch.length} setoran`, `${fmt(sum(mismatch, r => Math.abs(r.reported-r.actual)))} butir selisih`, "!")}
     </div>
     <div class="grid cols-2">
       <div><div class="section-head"><div><h2>Produksi tertinggi</h2><p>Berat bersih per setoran kandang</p></div></div>
-        <div class="card card-pad"><div class="progress-list">${topCages.length ? topCages.map(r => `<div class="progress-row"><b>${cage(r.cageId)?.name || "Kandang"}</b><div class="bar"><i style="width:${Math.round(r.weight/topCages[0].weight*100)}%"></i></div><span>${fmt(r.weight,1)} kg</span></div>`).join("") : empty("Belum ada setoran diterima")}</div></div>
+        <div class="card card-pad"><div class="progress-list">${topCages.length ? topCages.map(r => `<div class="progress-row"><b>${cage(r.cageId)?.name || "Kandang"}</b><div class="bar"><i style="width:${Math.round(r.weight/topCages[0].weight*100)}%"></i></div><span>${fmtKg(r.weight)} kg</span></div>`).join("") : empty("Belum ada setoran diterima")}</div></div>
       </div>
       <div><div class="section-head"><div><h2>Berat per grade</h2><p>Acuan input Accurate hari ini</p></div></div>
-        <div class="card card-pad"><div class="grade-grid">${["A","B","C","D","E"].map(g => `<div class="grade-box ${g === "E" ? "e" : ""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div><div class="hint" style="margin-top:14px">Total grading ${fmt(gradeTotal,1)} kg · Selisih terhadap timbang ${fmt(weight-gradeTotal,1)} kg</div></div>
+        <div class="card card-pad"><div class="grade-grid">${["A","B","C","D","E"].map(g => `<div class="grade-box ${g === "E" ? "e" : ""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmtKg(db.grading[g])} kg</strong></div>`).join("")}</div><div class="hint" style="margin-top:14px">Total grading ${fmtKg(gradeTotal)} kg · Selisih terhadap timbang ${fmtKg(weight-gradeTotal)} kg</div></div>
       </div>
     </div>
     ${recentTable(db.reports.slice(0,6))}`;
@@ -429,7 +442,7 @@ function correctionForm() {
         <div class="form-group"><label>Trip</label><select name="trip">${[1,2,3,4].map(n=>`<option value="${n}" ${report.trip===n?"selected":""}>Trip ${n}</option>`).join("")}</select></div>
         <div class="form-group"><label>Jumlah dilaporkan</label><input name="reported" type="number" min="1" value="${report.reported}" required /></div>
       </div>
-      ${isKeeper ? "" : `<div class="form-row"><div class="form-group"><label>Jumlah aktual</label><input name="actual" type="number" min="0" value="${report.actual ?? ""}" /></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight" type="number" min="0.1" step="0.1" value="${report.weight ?? ""}" /></div></div><div class="form-row"><div class="form-group"><label>Supir</label><select name="driver"><option value="">Belum dipilih</option>${db.drivers.map(d=>`<option ${report.driver===d?"selected":""}>${escapeHtml(d)}</option>`).join("")}</select></div><div class="form-group"><label>Status</label><select name="status"><option value="waiting" ${report.status==="waiting"?"selected":""}>Menunggu</option><option value="received" ${report.status==="received"?"selected":""}>Selesai</option></select></div></div>`}
+      ${isKeeper ? "" : `<div class="form-row"><div class="form-group"><label>Jumlah aktual</label><input name="actual" type="number" min="0" value="${report.actual ?? ""}" /></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight" type="number" min="0.01" step="0.01" value="${report.weight ?? ""}" /></div></div><div class="form-row"><div class="form-group"><label>Supir</label><select name="driver"><option value="">Belum dipilih</option>${db.drivers.map(d=>`<option ${report.driver===d?"selected":""}>${escapeHtml(d)}</option>`).join("")}</select></div><div class="form-group"><label>Status</label><select name="status"><option value="waiting" ${report.status==="waiting"?"selected":""}>Menunggu</option><option value="received" ${report.status==="received"?"selected":""}>Selesai</option></select></div></div>`}
       <div class="form-group"><label>Catatan koreksi</label><textarea name="note" placeholder="Tuliskan alasan koreksi">${escapeHtml(report.note || "")}</textarea></div>
       <div class="form-row"><button type="button" class="btn btn-outline" id="cancel-correction">Batal</button><button class="btn btn-primary">Simpan koreksi</button></div>
     </form></div></div>`;
@@ -461,7 +474,7 @@ function setoranPage() {
 
 function reportCard(r) {
   const c = cage(r.cageId);
-  return `<article class="queue-card"><div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h3>${c.name} · Trip ${r.trip}</h3>${statusBadge(r.status)}</div><p>${r.id} · dilaporkan ${r.reporter} pukul ${r.time}</p><div class="queue-meta"><span>${piecesLabel(r.reported)}</span>${r.actual != null && r.actual > 0 ? `<span><b>${fmt(r.actual)}</b> butir diterima</span>` : ""}${r.weight != null ? `<span><b>${fmt(r.weight,1)}</b> kg</span>` : ""}${r.driver ? `<span>Supir: <b>${r.driver}</b></span>` : ""}</div></div>${reportActions(r) ? `<div>${reportActions(r)}</div>` : ""}</article>`;
+  return `<article class="queue-card"><div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h3>${c.name} · Trip ${r.trip}</h3>${statusBadge(r.status)}</div><p>${r.id} · dilaporkan ${r.reporter} pukul ${r.time}</p><div class="queue-meta"><span>${piecesLabel(r.reported)}</span>${r.actual != null && r.actual > 0 ? `<span><b>${fmt(r.actual)}</b> butir diterima</span>` : ""}${r.weight != null ? `<span><b>${fmtKg(r.weight)}</b> kg</span>` : ""}${r.driver ? `<span>Supir: <b>${r.driver}</b></span>` : ""}</div></div>${reportActions(r) ? `<div>${reportActions(r)}</div>` : ""}</article>`;
 }
 
 function antrianPage() {
@@ -469,20 +482,26 @@ function antrianPage() {
   const waiting = db.reports.filter(r => r.status === "waiting");
   const done = db.reports.filter(r => r.status === "received");
   const tripNos = [...new Set(waiting.map(r => r.trip))].sort((a,b)=>a-b);
-  return `<section class="hero"><h2>${tripNos.length} trip menunggu</h2><p>Satu trip diproses sekaligus karena seluruh setoran datang bersama satu supir.</p><span class="date-pill">${waiting.length} kandang · ${fmt(sum(waiting,"reported"))} butir</span></section>
+  const isToday = state.queueDate === today;
+  return `<div class="report-toolbar">
+      <div><h2>Penerimaan ${dateLong(state.queueDate)}</h2><p>Lihat dan proses rit untuk tanggal yang dipilih</p></div>
+      ${dateControls("queue", state.queueDate)}
+    </div>
+    <section class="hero"><h2>${tripNos.length} trip menunggu</h2><p>Satu trip diproses sekaligus karena seluruh setoran datang bersama satu supir.</p><span class="date-pill">${waiting.length} kandang · ${fmt(sum(waiting,"reported"))} butir · ${isToday ? "Hari ini" : "Tanggal sebelumnya"}</span></section>
     <div class="section-head"><div><h2>Antrean per trip</h2><p>Pilih trip yang baru tiba di station timbang</p></div></div>
     <div class="queue">${tripNos.map(trip => { const rows=waiting.filter(r=>r.trip===trip); return `<article class="queue-card"><div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h3>Trip ${trip}</h3>${statusBadge("waiting")}</div><p>${rows.length} kandang datang bersamaan</p><div class="queue-meta"><span><b>${fmt(sum(rows,"reported"))}</b> butir dilaporkan</span><span>${rows.map(r=>cage(r.cageId).name).join(", ")}</span></div></div><button class="btn btn-primary" data-receive-trip="${trip}">Proses Trip ${trip}</button></article>`; }).join("") || empty("Semua trip sudah diperiksa")}</div>
-    <div class="section-head"><div><h2>Selesai hari ini</h2><p>${done.length} setoran</p></div></div>${recentTable(done)}`;
+    <div class="section-head"><div><h2>Selesai ${isToday ? "hari ini" : "tanggal terpilih"}</h2><p>${done.length} setoran · ${fmtKg(sum(done,"weight"))} kg</p></div></div>${recentTable(done)}`;
 }
 
 function receiveTripForm(trip) {
   const rows = db.reports.filter(r=>r.status==="waiting" && r.trip===Number(trip));
   if (!rows.length) { state.selectedTrip = null; return antrianPage(); }
   return `<button class="btn btn-outline" id="back-queue">← Kembali ke antrean</button>
-    <div class="card card-pad" style="margin-top:16px"><div class="card-title">Penerimaan Trip ${trip}</div><p class="card-sub">${rows.length} kandang · ${fmt(sum(rows,"reported"))} butir dilaporkan</p>
+    <div class="card card-pad" style="margin-top:16px"><div class="card-title">Penerimaan Trip ${trip}</div><p class="card-sub">${dateLong(state.queueDate)} · ${rows.length} kandang · ${fmt(sum(rows,"reported"))} butir dilaporkan</p>
       <form id="receive-trip-form" style="margin-top:22px"><div class="form-group"><label>Nama supir untuk Trip ${trip}</label><select name="driver" required><option value="">Pilih supir</option>${db.drivers.map(d=>`<option>${d}</option>`).join("")}</select></div>
-        <div class="queue">${rows.map(r=>`<article class="queue-card" style="display:block"><div style="display:flex;justify-content:space-between;gap:10px"><div><h3>${cage(r.cageId).name}</h3><p>${r.id} · ${r.reporter} · ${r.time}</p></div><span class="number">${fmt(r.reported)} butir</span></div><div class="form-row" style="margin-top:16px"><div class="form-group"><label>Jumlah aktual (butir)</label><input name="actual_${r.id}" type="number" min="0" value="${r.reported}" required /></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight_${r.id}" type="number" step="0.1" min="0.1" placeholder="0,0" required /></div></div><div class="form-group" style="margin-bottom:0"><label>Catatan jika ada selisih</label><input name="note_${r.id}" placeholder="Opsional jika jumlah sesuai" /></div></article>`).join("")}</div>
-        <div class="hint" style="margin:18px 0">ⓘ Supir yang dipilih akan tercatat untuk seluruh kandang dalam Trip ${trip}.</div><button class="btn btn-primary btn-block">Konfirmasi seluruh Trip ${trip}</button></form></div>`;
+        <div class="queue">${rows.map(r=>`<article class="queue-card" style="display:block"><div style="display:flex;justify-content:space-between;gap:10px"><div><h3>${cage(r.cageId).name}</h3><p>${r.id} · ${r.reporter} · ${r.time}</p></div><span class="number">${fmt(r.reported)} butir</span></div><div class="form-row" style="margin-top:16px"><div class="form-group"><label>Jumlah aktual (butir)</label><input name="actual_${r.id}" type="number" min="0" value="${r.reported}" required /></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight_${r.id}" type="number" step="0.01" min="0.01" placeholder="0,00" required /></div></div><div class="form-group" style="margin-bottom:0"><label>Catatan jika ada selisih</label><input name="note_${r.id}" placeholder="Opsional jika jumlah sesuai" /></div></article>`).join("")}</div>
+        <div class="reconcile"><div><small>Total kandang</small><strong>${rows.length}</strong></div><div><small>Dilaporkan</small><strong>${fmt(sum(rows,"reported"))} butir</strong></div><div><small>Total kg rit</small><strong id="receive-trip-total">0,00 kg</strong></div></div>
+        <div class="hint" style="margin:18px 0">ⓘ Supir yang dipilih akan tercatat untuk seluruh kandang dalam Trip ${trip} tanggal ${dateLong(state.queueDate)}.</div><button class="btn btn-primary btn-block">Konfirmasi seluruh Trip ${trip}</button></form></div>`;
 }
 
 function gradingPage() {
@@ -500,12 +519,55 @@ function gradingPage() {
         ${isToday ? "" : `<button class="btn btn-light" type="button" id="grading-today">Hari ini</button>`}
       </div>
     </div>
-    <section class="hero"><h2>Grading gabungan ${isToday ? "hari ini" : "tanggal terpilih"}</h2><p>Semua telur yang diterima pada tanggal ini digabung setelah penimbangan per kandang.</p><span class="date-pill">${received.length} setoran · ${fmt(inWeight,1)} kg masuk · ${db.grading.closed ? "Sudah selesai" : "Belum ditutup"}</span></section>
-    <div class="card card-pad"><form id="grading-form"><div class="grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${labels[g]}</small><input name="${g}" type="number" min="0" step="0.1" value="${db.grading[g]}" aria-label="Grade ${g}"/></div>`).join("")}</div>
-      <div class="reconcile"><div><small>Berat masuk</small><strong>${fmt(inWeight,1)} kg</strong></div><div><small>Total grading</small><strong id="grade-total">${fmt(total,1)} kg</strong></div><div><small>Selisih</small><strong id="grade-diff">${fmt(inWeight-total,1)} kg</strong></div><div><small>Afkir (E)</small><strong id="grade-e">${fmt(db.grading.E,1)} kg</strong></div></div>
+    <section class="hero"><h2>Grading gabungan ${isToday ? "hari ini" : "tanggal terpilih"}</h2><p>Semua telur yang diterima pada tanggal ini digabung setelah penimbangan per kandang.</p><span class="date-pill">${received.length} setoran · ${fmtKg(inWeight)} kg masuk · ${db.grading.closed ? "Sudah selesai" : "Belum ditutup"}</span></section>
+    <div class="card card-pad"><form id="grading-form"><div class="grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${labels[g]}</small><input name="${g}" type="number" min="0" step="0.01" value="${db.grading[g]}" aria-label="Grade ${g}"/></div>`).join("")}</div>
+      <div class="reconcile"><div><small>Berat masuk</small><strong>${fmtKg(inWeight)} kg</strong></div><div><small>Total grading</small><strong id="grade-total">${fmtKg(total)} kg</strong></div><div><small>Selisih</small><strong id="grade-diff">${fmtKg(inWeight-total)} kg</strong></div><div><small>Afkir (E)</small><strong id="grade-e">${fmtKg(db.grading.E)} kg</strong></div></div>
       <div class="form-group" style="margin-top:18px"><label>Catatan gudang</label><textarea name="note" placeholder="Catatan penyebab selisih atau afkir">${escapeHtml(db.grading.note)}</textarea></div>
       <div class="form-row"><button type="submit" name="action" value="save" class="btn btn-light">Simpan sementara</button><button type="submit" name="action" value="close" class="btn btn-primary">${db.grading.closed ? "Simpan pembaruan" : "Selesaikan pekerjaan"}</button></div>
     </form></div>`;
+}
+
+function groupReportsByTrip(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = row.trip;
+    const item = map.get(key) || { trip: row.trip, drivers: new Set(), cages: new Set(), rows: [], reported: 0, actual: 0, weight: 0 };
+    if (row.driver) item.drivers.add(row.driver);
+    item.cages.add(row.cageId);
+    item.rows.push(row);
+    item.reported += Number(row.reported || 0);
+    item.actual += Number(row.actual || 0);
+    item.weight += Number(row.weight || 0);
+    map.set(key, item);
+  }
+  return [...map.values()].sort((a, b) => Number(a.trip) - Number(b.trip));
+}
+
+function groupReportsByCage(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = row.cageId;
+    const item = map.get(key) || { cageId: row.cageId, trips: new Set(), rows: [], reported: 0, actual: 0, weight: 0 };
+    item.trips.add(row.trip);
+    item.rows.push(row);
+    item.reported += Number(row.reported || 0);
+    item.actual += Number(row.actual || 0);
+    item.weight += Number(row.weight || 0);
+    map.set(key, item);
+  }
+  return [...map.values()].sort((a, b) => (cage(a.cageId)?.name || "").localeCompare(cage(b.cageId)?.name || "", "id"));
+}
+
+function tripSummaryTable(rows, title = "Total penerimaan per rit", subtitle = "Gabungan seluruh kandang dalam satu rit/trip") {
+  const groups = groupReportsByTrip(rows.filter(r => r.status === "received"));
+  return `<div class="section-head"><div><h2>${title}</h2><p>${subtitle}</p></div></div>
+    <div class="card table-wrap"><table><thead><tr><th>Rit / Trip</th><th>Supir</th><th>Kandang</th><th>Dilaporkan</th><th>Diterima</th><th>Total kg</th></tr></thead><tbody>${groups.map(g=>`<tr><td><b>Trip ${g.trip}</b></td><td>${[...g.drivers].join(", ") || "–"}</td><td>${g.cages.size} kandang</td><td>${fmt(g.reported)} butir</td><td>${g.actual ? `${fmt(g.actual)} butir` : "Input kg langsung"}</td><td><b>${fmtKg(g.weight)} kg</b></td></tr>`).join("") || `<tr><td colspan="6">${empty("Belum ada penerimaan selesai")}</td></tr>`}</tbody></table></div>`;
+}
+
+function cageDailySummaryTable(rows) {
+  const groups = groupReportsByCage(rows);
+  return `<div class="section-head"><div><h2>Rekap per kandang per hari</h2><p>Total setoran, penerimaan, dan berat per kandang pada tanggal laporan</p></div></div>
+    <div class="card table-wrap"><table><thead><tr><th>Kandang</th><th>Trip</th><th>Setoran</th><th>Dilaporkan</th><th>Diterima</th><th>Total kg</th><th>Status</th></tr></thead><tbody>${groups.map(g=>{const c=cage(g.cageId);const waiting=g.rows.filter(r=>r.status==="waiting").length;return `<tr><td><b>${c?.name || "Kandang"}</b><br><small>${c?.code || ""}</small></td><td>${[...g.trips].sort((a,b)=>a-b).map(t=>`Trip ${t}`).join(", ")}</td><td>${g.rows.length}</td><td>${fmt(g.reported)} butir</td><td>${g.actual ? `${fmt(g.actual)} butir` : "Input kg langsung"}</td><td><b>${fmtKg(g.weight)} kg</b></td><td>${waiting ? statusBadge("waiting") : statusBadge("received")}</td></tr>`}).join("") || `<tr><td colspan="7">${empty("Belum ada data kandang")}</td></tr>`}</tbody></table></div>`;
 }
 
 function laporanPage() {
@@ -529,9 +591,11 @@ function laporanPage() {
         <button class="btn btn-outline" id="export-csv">⇩ Unduh CSV</button>
       </div>
     </div>
-    <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(receivedPieces)} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmt(weight,1)} kg`, receivedPieces ? `Rata-rata ${fmt(weight*1000/receivedPieces,1)} g/butir` : "Belum ada penerimaan", "▣")}${stat("Total grading", `${fmt(gradeTotal,1)} kg`, `Selisih ${fmt(weight-gradeTotal,1)} kg`, "◫")}</div>
+    <div class="grid cols-4">${stat("Telur dilaporkan", `${fmt(sum(db.reports,"reported"))} butir`, `${db.reports.length} setoran`, "◉")}${stat("Telur diterima", `${fmt(receivedPieces)} butir`, `${mismatch.length} memiliki selisih`, "✓")}${stat("Berat bersih", `${fmtKg(weight)} kg`, receivedPieces ? `Rata-rata ${fmt(weight*1000/receivedPieces,2)} g/butir` : "Belum ada penerimaan", "▣")}${stat("Total grading", `${fmtKg(gradeTotal)} kg`, `Selisih ${fmtKg(weight-gradeTotal)} kg`, "◫")}</div>
     <div class="section-head"><div><h2>Berat per grade</h2><p>Rekap kilogram hasil grading A sampai E</p></div>${canEditGrading ? `<button class="btn btn-outline" id="edit-grading-from-report">Ubah grading</button>` : ""}</div>
-    <div class="card card-pad"><div class="grade-grid report-grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmt(db.grading[g],1)} kg</strong></div>`).join("")}</div></div>
+    <div class="card card-pad"><div class="grade-grid report-grade-grid">${["A","B","C","D","E"].map(g=>`<div class="grade-box ${g==="E"?"e":""}"><b>${g}</b><small>${gradeLabels[g]}</small><strong style="display:block;margin-top:8px">${fmtKg(db.grading[g])} kg</strong></div>`).join("")}</div></div>
+    ${tripSummaryTable(db.reports)}
+    ${cageDailySummaryTable(db.reports)}
     ${recentTable(db.reports)}
     <div class="section-head"><div><h2>Kontrol per supir</h2><p>Jumlah trip dan selisih butir</p></div></div>
     <div class="card table-wrap"><table><thead><tr><th>Supir</th><th>Trip diproses</th><th>Dilaporkan</th><th>Diterima</th><th>Selisih</th></tr></thead><tbody>${db.drivers.map(d=>{const rows=received.filter(r=>r.driver===d);const diff=sum(rows,r=>r.actual-r.reported);return `<tr><td><b>${d}</b></td><td>${new Set(rows.map(r=>r.trip)).size}</td><td>${fmt(sum(rows,"reported"))} butir</td><td>${fmt(sum(rows,"actual"))} butir</td><td class="${diff<0?"negative":""}">${fmt(diff)} butir</td></tr>`}).join("")}</tbody></table></div>`;
@@ -539,22 +603,33 @@ function laporanPage() {
 
 function directWeightPage() {
   const activeCages = db.cages.filter(c => c.status === "Aktif");
-  return `<div class="form-card"><div class="card card-pad">
+  const isToday = state.directDate === today;
+  return `<div class="report-toolbar">
+      <div><h2>Input Kg ${dateLong(state.directDate)}</h2><p>Pilih tanggal setoran kg langsung yang ingin dicatat</p></div>
+      <div class="date-controls">
+        <button class="btn btn-outline date-step" type="button" data-direct-day="-1" title="Tanggal sebelumnya" aria-label="Tanggal sebelumnya">‹</button>
+        <input id="direct-date" type="date" value="${state.directDate}" max="${today}" aria-label="Pilih tanggal input kg" />
+        <button class="btn btn-outline date-step" type="button" data-direct-day="1" title="Tanggal berikutnya" aria-label="Tanggal berikutnya" ${isToday ? "disabled" : ""}>›</button>
+        ${isToday ? "" : `<button class="btn btn-light" type="button" id="direct-today">Hari ini</button>`}
+      </div>
+    </div>
+  <div class="form-card"><div class="card card-pad">
     <div class="card-title">Input kg langsung</div><p class="card-sub">Dipakai saat Anak Kandang belum input butir, tetapi penerimaan sudah perlu mencatat kg per kandang dan trip.</p>
     <form id="direct-weight-form" style="margin-top:22px">
-      <div class="form-row"><div class="form-group"><label>Kandang</label><select name="cageId" required>${activeCages.map(c=>`<option value="${c.id}">${escapeHtml(c.code)} · ${escapeHtml(c.name)}</option>`).join("")}</select></div><div class="form-group"><label>Trip</label><select name="trip">${[1,2,3,4].map(n=>`<option value="${n}">Trip ${n}</option>`).join("")}</select></div></div>
-      <div class="form-row"><div class="form-group"><label>Supir</label><select name="driver" required><option value="">Pilih supir</option>${db.drivers.map(d=>`<option>${escapeHtml(d)}</option>`).join("")}</select></div><div class="form-group"><label>Berat bersih (kg)</label><input name="weight" type="number" min="0.1" step="0.1" required /></div></div>
+      <div class="form-row"><div class="form-group"><label>Tanggal setoran</label><input id="direct-form-date" name="date" type="date" value="${state.directDate}" max="${today}" required /></div><div class="form-group"><label>Trip</label><select name="trip">${[1,2,3,4].map(n=>`<option value="${n}">Trip ${n}</option>`).join("")}</select></div></div>
+      <div class="form-row"><div class="form-group"><label>Kandang</label><select name="cageId" required>${activeCages.map(c=>`<option value="${c.id}">${escapeHtml(c.code)} · ${escapeHtml(c.name)}</option>`).join("")}</select></div><div class="form-group"><label>Supir</label><select name="driver" required><option value="">Pilih supir</option>${db.drivers.map(d=>`<option>${escapeHtml(d)}</option>`).join("")}</select></div></div>
+      <div class="form-group"><label>Berat bersih (kg)</label><input name="weight" type="number" min="0.01" step="0.01" required /></div>
       <div class="form-group"><label>Catatan</label><textarea name="note" placeholder="Contoh: input langsung karena data butir belum tersedia"></textarea></div>
-      <div class="hint" style="margin-bottom:18px">Setoran ini akan masuk laporan sebagai data kg langsung dengan jumlah butir 0.</div>
+      <div class="hint" style="margin-bottom:18px">Setoran ini akan masuk laporan ${dateLong(state.directDate)} sebagai data kg langsung dengan jumlah butir 0.</div>
       <button class="btn btn-primary btn-block">Simpan kg langsung</button>
     </form></div></div>
-    <div class="section-head"><div><h2>Input kg langsung hari ini</h2><p>Setoran dengan catatan kiloan langsung</p></div></div>
+    <div class="section-head"><div><h2>Input kg langsung ${isToday ? "hari ini" : "tanggal terpilih"}</h2><p>Setoran dengan catatan kiloan langsung</p></div></div>
     ${recentTable(db.reports.filter(r=>r.note?.includes("Input kg langsung")))}`;
 }
 
 function recentTable(rows) {
   const showActions = rows.some(r => canCorrectReport(r));
-  return `${correctionForm()}<div class="section-head"><div><h2>Detail setoran</h2><p>Jejak lengkap per kandang dan petugas</p></div></div><div class="card table-wrap"><table><thead><tr><th>Kandang / Trip</th><th>Pelapor</th><th>Dilaporkan</th><th>Diterima</th><th>Berat</th><th>Supir</th><th>Status</th>${showActions ? "<th></th>" : ""}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${cage(r.cageId)?.name || "Kandang"}</b><br><small>${r.id} · Trip ${r.trip}</small></td><td>${r.reporter}</td><td>${piecesLabel(r.reported)}</td><td>${r.actual==null||r.actual===0?"–":`${fmt(r.actual)} butir`}</td><td>${r.weight==null?"–":`${fmt(r.weight,1)} kg`}</td><td>${r.driver||"–"}</td><td>${statusBadge(r.status)}</td>${showActions ? `<td>${reportActions(r)}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
+  return `${correctionForm()}<div class="section-head"><div><h2>Detail setoran</h2><p>Jejak lengkap per kandang dan petugas</p></div></div><div class="card table-wrap"><table><thead><tr><th>Kandang / Trip</th><th>Pelapor</th><th>Dilaporkan</th><th>Diterima</th><th>Berat</th><th>Supir</th><th>Status</th>${showActions ? "<th></th>" : ""}</tr></thead><tbody>${rows.map(r=>`<tr><td><b>${cage(r.cageId)?.name || "Kandang"}</b><br><small>${r.id} · Trip ${r.trip}</small></td><td>${r.reporter}</td><td>${piecesLabel(r.reported)}</td><td>${r.actual==null||r.actual===0?"–":`${fmt(r.actual)} butir`}</td><td>${r.weight==null?"–":`${fmtKg(r.weight)} kg`}</td><td>${r.driver||"–"}</td><td>${statusBadge(r.status)}</td>${showActions ? `<td>${reportActions(r)}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
 }
 
 function cagesPage() {
@@ -568,7 +643,25 @@ function driversPage() {
   const rows = db.driverRows || [];
   const editing = rows.find(driver => Number(driver.id) === Number(state.editDriverId));
   const showForm = state.showDriverForm || editing;
+  const received = db.reports.filter(r => r.status === "received");
+  const byDriver = rows.map(driver => {
+    const driverRows = received.filter(report => report.driver === driver.name);
+    return {
+      driver,
+      rows: driverRows,
+      trips: new Set(driverRows.map(report => report.trip)),
+      cages: new Set(driverRows.map(report => report.cageId)),
+      weight: sum(driverRows, "weight"),
+      actual: sum(driverRows, "actual"),
+    };
+  });
   return `${showForm ? `<div class="form-card" style="margin-bottom:20px"><div class="card card-pad"><div class="card-title">${editing ? "Ubah supir" : "Tambah supir"}</div><p class="card-sub">Supir aktif akan muncul di pilihan penerimaan trip.</p><form id="driver-form" style="margin-top:20px"><div class="form-row"><div class="form-group"><label>Nama supir</label><input name="name" value="${escapeHtml(editing?.name || "")}" required /></div><div class="form-group"><label>Status</label><select name="status"><option value="active" ${editing?.is_active !== false ? "selected" : ""}>Aktif</option><option value="inactive" ${editing?.is_active === false ? "selected" : ""}>Nonaktif</option></select></div></div><div class="form-row"><button type="button" class="btn btn-outline" id="cancel-driver">Batal</button><button class="btn btn-primary">Simpan supir</button></div></form></div></div>` : ""}
+  <div class="report-toolbar">
+    <div><h2>Rekap supir ${dateLong(state.driverDate)}</h2><p>Lihat total penerimaan dan rit per supir pada tanggal yang dipilih</p></div>
+    ${dateControls("driver", state.driverDate)}
+  </div>
+  <div class="card table-wrap"><table><thead><tr><th>Supir</th><th>Rit / Trip</th><th>Kandang</th><th>Diterima</th><th>Total kg</th><th>Status</th></tr></thead><tbody>${byDriver.map(item=>`<tr><td><b>${escapeHtml(item.driver.name)}</b></td><td>${item.trips.size || "–"}</td><td>${item.cages.size || "–"}</td><td>${item.actual ? `${fmt(item.actual)} butir` : (item.rows.length ? "Input kg langsung" : "–")}</td><td><b>${fmtKg(item.weight)} kg</b></td><td>${statusBadge(item.driver.is_active ? "Aktif" : "Nonaktif")}</td></tr>`).join("") || `<tr><td colspan="6">${empty("Belum ada supir")}</td></tr>`}</tbody></table></div>
+  ${tripSummaryTable(db.reports, "Total penerimaan dalam 1 rit", "Rincian total kg per trip/rit pada tanggal yang dipilih")}
   <div class="section-head"><div><h2>Daftar supir</h2><p>Kelola nama supir yang dipakai saat proses penerimaan trip</p></div><button class="btn btn-primary" id="add-driver">+ Tambah supir</button></div>
   <div class="card table-wrap"><table><thead><tr><th>Nama supir</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(driver=>`<tr><td><b>${escapeHtml(driver.name)}</b></td><td>${statusBadge(driver.is_active ? "Aktif" : "Nonaktif")}</td><td><button class="btn btn-outline" data-edit-driver="${driver.id}">Ubah</button> <button class="btn btn-outline" data-toggle-driver="${driver.id}">${driver.is_active ? "Nonaktifkan" : "Aktifkan"}</button></td></tr>`).join("") || `<tr><td colspan="3">${empty("Belum ada supir")}</td></tr>`}</tbody></table></div>`;
 }
@@ -654,17 +747,79 @@ function bindEvents() {
       toast(error.message || "Gagal mengirim setoran");
     }
   });
-  document.querySelector("#direct-weight-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={cageId:Number(fd.get("cageId")),trip:Number(fd.get("trip")),driver:String(fd.get("driver")),weight:Number(fd.get("weight")),note:String(fd.get("note")||"").trim()};try{const reference=await saveDirectWeightToSupabase(values);await loadOperationalData();audit(`input kg langsung ${reference} sebesar ${fmt(values.weight,1)} kg`);render();toast("Input kg langsung tersimpan")}catch(error){toast(error.message||"Gagal menyimpan kg langsung")}});
+  document.querySelector("#direct-weight-form")?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const selectedDate=String(fd.get("date")||state.directDate);const values={date:selectedDate,cageId:Number(fd.get("cageId")),trip:Number(fd.get("trip")),driver:String(fd.get("driver")),weight:Number(fd.get("weight")),note:String(fd.get("note")||"").trim()};try{state.directDate=selectedDate;const reference=await saveDirectWeightToSupabase(values);await loadOperationalData(selectedDate);audit(`input kg langsung ${reference} sebesar ${fmtKg(values.weight)} kg untuk ${selectedDate}`);render();toast("Input kg langsung tersimpan")}catch(error){toast(error.message||"Gagal menyimpan kg langsung")}});
+  const openDirectDate = async value => {
+    const nextDate = String(value || "");
+    if (!nextDate || nextDate > today) {
+      toast("Tanggal input kg tidak boleh melewati hari ini");
+      return;
+    }
+    try {
+      state.directDate = nextDate;
+      await loadOperationalData(nextDate);
+      render();
+    } catch (error) {
+      toast(error.message || "Gagal memuat input kg tanggal tersebut");
+    }
+  };
+  document.querySelector("#direct-date")?.addEventListener("change", e => openDirectDate(e.currentTarget.value));
+  document.querySelector("#direct-form-date")?.addEventListener("change", e => openDirectDate(e.currentTarget.value));
+  document.querySelectorAll("[data-direct-day]").forEach(el => el.addEventListener("click", () => openDirectDate(shiftDate(state.directDate, Number(el.dataset.directDay)))));
+  document.querySelector("#direct-today")?.addEventListener("click", () => openDirectDate(today));
   document.querySelectorAll("[data-receive-trip]").forEach(el=>el.onclick=()=>{state.selectedTrip=Number(el.dataset.receiveTrip);render();window.scrollTo(0,0)});
   document.querySelector("#back-queue")?.addEventListener("click",()=>{state.selectedTrip=null;render()});
+  const openQueueDate = async value => {
+    const nextDate = String(value || "");
+    if (!nextDate || nextDate > today) {
+      toast("Tanggal penerimaan tidak boleh melewati hari ini");
+      return;
+    }
+    try {
+      state.queueDate = nextDate;
+      state.selectedTrip = null;
+      await loadOperationalData(nextDate);
+      render();
+    } catch (error) {
+      toast(error.message || "Gagal memuat penerimaan tanggal tersebut");
+    }
+  };
+  document.querySelector("#queue-date")?.addEventListener("change", e => openQueueDate(e.currentTarget.value));
+  document.querySelectorAll("[data-queue-day]").forEach(el => el.addEventListener("click", () => openQueueDate(shiftDate(state.queueDate, Number(el.dataset.queueDay)))));
+  document.querySelector("#queue-today")?.addEventListener("click", () => openQueueDate(today));
+  const openDriverDate = async value => {
+    const nextDate = String(value || "");
+    if (!nextDate || nextDate > today) {
+      toast("Tanggal rekap supir tidak boleh melewati hari ini");
+      return;
+    }
+    try {
+      state.driverDate = nextDate;
+      await loadOperationalData(nextDate);
+      render();
+    } catch (error) {
+      toast(error.message || "Gagal memuat rekap supir tanggal tersebut");
+    }
+  };
+  document.querySelector("#driver-date")?.addEventListener("change", e => openDriverDate(e.currentTarget.value));
+  document.querySelectorAll("[data-driver-day]").forEach(el => el.addEventListener("click", () => openDriverDate(shiftDate(state.driverDate, Number(el.dataset.driverDay)))));
+  document.querySelector("#driver-today")?.addEventListener("click", () => openDriverDate(today));
+  const receiveTripFormEl = document.querySelector("#receive-trip-form");
+  receiveTripFormEl?.addEventListener("input", () => {
+    const fd = new FormData(receiveTripFormEl);
+    const total = db.reports
+      .filter(r => r.status === "waiting" && r.trip === state.selectedTrip)
+      .reduce((acc, r) => acc + Number(fd.get(`weight_${r.id}`) || 0), 0);
+    const totalEl = document.querySelector("#receive-trip-total");
+    if (totalEl) totalEl.textContent = `${fmtKg(total)} kg`;
+  });
   document.querySelector("#receive-trip-form")?.addEventListener("submit",async e=>{
     e.preventDefault();const fd=new FormData(e.currentTarget);const rows=db.reports.filter(r=>r.status==="waiting"&&r.trip===state.selectedTrip);const driver=fd.get("driver");
     for(const r of rows){const actual=Number(fd.get(`actual_${r.id}`));const note=String(fd.get(`note_${r.id}`)||"").trim();if(actual!==r.reported&&!note){toast(`Isi catatan selisih untuk ${cage(r.cageId).name}`);return;}}
     try {
-      await receiveTripToSupabase(state.selectedTrip, driver, rows, fd);
-      audit(`mengonfirmasi Trip ${state.selectedTrip} dengan supir ${driver} (${rows.length} kandang)`);
+      await receiveTripToSupabase(state.selectedTrip, driver, rows, fd, state.queueDate);
+      audit(`mengonfirmasi Trip ${state.selectedTrip} tanggal ${state.queueDate} dengan supir ${driver} (${rows.length} kandang)`);
       state.selectedTrip=null;
-      await loadOperationalData();
+      await loadOperationalData(state.queueDate);
       render();
       toast("Seluruh setoran dalam trip berhasil diterima");
     } catch (error) {
@@ -672,7 +827,7 @@ function bindEvents() {
     }
   });
   const gradingForm=document.querySelector("#grading-form");
-  gradingForm?.addEventListener("input",()=>{const fd=new FormData(gradingForm);const total=["A","B","C","D","E"].reduce((a,g)=>a+Number(fd.get(g)||0),0);const incoming=sum(db.reports.filter(r=>r.status==="received"),"weight");document.querySelector("#grade-total").textContent=`${fmt(total,1)} kg`;document.querySelector("#grade-diff").textContent=`${fmt(incoming-total,1)} kg`;document.querySelector("#grade-e").textContent=`${fmt(fd.get("E"),1)} kg`});
+  gradingForm?.addEventListener("input",()=>{const fd=new FormData(gradingForm);const total=["A","B","C","D","E"].reduce((a,g)=>a+Number(fd.get(g)||0),0);const incoming=sum(db.reports.filter(r=>r.status==="received"),"weight");document.querySelector("#grade-total").textContent=`${fmtKg(total)} kg`;document.querySelector("#grade-diff").textContent=`${fmtKg(incoming-total)} kg`;document.querySelector("#grade-e").textContent=`${fmtKg(fd.get("E"))} kg`});
   gradingForm?.addEventListener("submit",async e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const values={A:Number(fd.get("A")||0),B:Number(fd.get("B")||0),C:Number(fd.get("C")||0),D:Number(fd.get("D")||0),E:Number(fd.get("E")||0),note:String(fd.get("note")||""),closed:db.grading.closed||e.submitter?.value==="close"};try{await saveGradingToSupabase(values,state.gradingDate);await loadOperationalData(state.gradingDate);audit(`${values.closed?"menyelesaikan":"menyimpan"} grading ${state.gradingDate}`);render();toast(values.closed?"Pekerjaan tanggal tersebut berhasil diselesaikan":"Grading sementara tersimpan")}catch(error){toast(error.message||"Gagal menyimpan grading")}});
   const openGradingDate = async value => {
     const nextDate = String(value || "");
@@ -796,7 +951,7 @@ async function saveDirectWeightToSupabase(values) {
   const { data: trip, error: tripError } = await supabase
     .from("pickup_trips")
     .upsert({
-      trip_date: today,
+      trip_date: values.date || today,
       trip_no: values.trip,
       driver_id: driver.id,
       receiver_id: userId,
@@ -811,7 +966,7 @@ async function saveDirectWeightToSupabase(values) {
   const note = `Input kg langsung${values.note ? `: ${values.note}` : ""}`;
   const { error } = await supabase.from("deposits").insert({
     reference_no: reference,
-    report_date: today,
+    report_date: values.date || today,
     cage_id: values.cageId,
     trip_no: values.trip,
     trip_id: trip.id,
@@ -890,7 +1045,7 @@ async function cancelReportInSupabase(report) {
   if (error) throw error;
 }
 
-async function receiveTripToSupabase(tripNo, driverName, rows, fd) {
+async function receiveTripToSupabase(tripNo, driverName, rows, fd, tripDate = today) {
   const { data } = await supabase.auth.getSession();
   const userId = data.session?.user?.id;
   if (!userId) throw new Error("Sesi login habis. Silakan masuk ulang.");
@@ -900,7 +1055,7 @@ async function receiveTripToSupabase(tripNo, driverName, rows, fd) {
   const { data: trip, error: tripError } = await supabase
     .from("pickup_trips")
     .upsert({
-      trip_date: today,
+      trip_date: tripDate,
       trip_no: tripNo,
       driver_id: driver.id,
       receiver_id: userId,
